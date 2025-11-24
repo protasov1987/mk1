@@ -387,12 +387,55 @@ footer {
   padding: 6px 8px;
   border-radius: 6px;
   border: 1px solid #d1d5db;
+  resize: vertical;
+  min-height: 32px;
+  line-height: 1.35;
+  overflow: hidden;
 }
 
 .comment-readonly {
   min-height: 20px;
   padding: 4px 2px;
   color: #374151;
+}
+
+.summary-barcode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#workorders-table-wrapper .wo-card,
+#archive-table-wrapper .wo-card {
+  margin: 0;
+  border-radius: 0;
+}
+
+#workorders-table-wrapper .wo-card + .wo-card,
+#archive-table-wrapper .wo-card + .wo-card {
+  border-top: 1px solid #e5e7eb;
+}
+
+#workorders-table-wrapper .wo-card:first-child,
+#archive-table-wrapper .wo-card:first-child {
+  border-top-left-radius: 10px;
+  border-top-right-radius: 10px;
+}
+
+#workorders-table-wrapper .wo-card:last-child,
+#archive-table-wrapper .wo-card:last-child {
+  border-bottom-left-radius: 10px;
+  border-bottom-right-radius: 10px;
+  margin-bottom: 12px;
+}
+
+.dash-comment-line {
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+
+.dash-comment-op {
+  font-weight: 600;
 }
 
 /* Дашборд – отображение операций */

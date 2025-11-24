@@ -9,6 +9,7 @@ let workorderStatusFilter = 'ALL';
 let archiveSearchTerm = '';
 let archiveStatusFilter = 'ALL';
 let apiOnline = false;
+const workorderOpenCards = new Set();
 
 function setConnectionStatus(message, variant = 'info') {
   const banner = document.getElementById('server-status');
@@ -56,6 +57,12 @@ function getOperationElapsedSeconds(op) {
     return base + (Date.now() - op.startedAt) / 1000;
   }
   return base;
+}
+
+function autoResizeComment(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
 }
 
 // === EAN-13: генерация и прорисовка ===
@@ -522,8 +529,9 @@ function renderDashboard() {
         if (plannedSec && elapsed > plannedSec) {
           cls += ' dash-op-overdue';
         }
+        const commentSuffix = op.comment ? ' — ' + escapeHtml(op.comment) : '';
         statusHtml += '<span class="' + cls + '">' +
-          escapeHtml(op.opName) + ' — ' + formatSecondsToHMS(elapsed) +
+          escapeHtml(op.opName) + ' — ' + formatSecondsToHMS(elapsed) + commentSuffix +
           '</span>';
       });
     } else {
@@ -535,14 +543,18 @@ function renderDashboard() {
           const newOrder = typeof o.order === 'number' ? o.order : 999999;
           if (newOrder < curOrder) next = o;
         });
-        statusHtml = escapeHtml(next.opName) + ' (ожидание)';
+        const commentSuffix = next.comment ? ' — ' + escapeHtml(next.comment) : '';
+        statusHtml = escapeHtml(next.opName) + ' (ожидание)' + commentSuffix;
       } else {
         statusHtml = 'Не запущена';
       }
     }
 
     const completedCount = opsArr.filter(o => o.status === 'DONE').length;
-    const comment = getCardComment(card);
+    const commentLines = opsArr
+      .filter(o => o.comment)
+      .map(o => '<div class="dash-comment-line"><span class="dash-comment-op">' + escapeHtml(o.opName) + ':</span> ' + escapeHtml(o.comment) + '</div>');
+    const commentCell = commentLines.join('');
 
     html += '<tr>' +
       '<td>' + escapeHtml(card.barcode || '') + '</td>' +
@@ -550,7 +562,7 @@ function renderDashboard() {
       '<td>' + escapeHtml(card.orderNo || '') + '</td>' +
       '<td><span class="dashboard-card-status" data-card-id="' + card.id + '">' + statusHtml + '</span></td>' +
       '<td>' + completedCount + ' из ' + (card.operations ? card.operations.length : 0) + '</td>' +
-      '<td>' + escapeHtml(comment) + '</td>' +
+      '<td>' + commentCell + '</td>' +
       '</tr>';
   });
 
@@ -807,8 +819,9 @@ function cardSearchScore(card, term) {
 
 function buildOperationsTable(card, { readonly = false } = {}) {
   let html = '<table><thead><tr>' +
-    '<th>Операция</th><th>Участок</th><th>Исполнитель</th><th>Статус</th><th>План (мин)</th><th>Текущее / факт. время</th><th>Комментарии</th>' +
+    '<th>Операция</th><th>Участок</th><th>Исполнитель</th><th>Статус</th><th>План (мин)</th><th>Текущее / факт. время</th>' +
     (readonly ? '' : '<th>Действия</th>') +
+    '<th>Комментарии</th>' +
     '</tr></thead><tbody>';
 
   card.operations.forEach(op => {
@@ -844,7 +857,7 @@ function buildOperationsTable(card, { readonly = false } = {}) {
 
     const commentCell = readonly || op.status === 'DONE'
       ? '<div class="comment-readonly">' + escapeHtml(op.comment || '') + '</div>'
-      : '<input class="comment-input" data-card-id="' + card.id + '" data-op-id="' + op.id + '" value="' + escapeHtml(op.comment || '') + '" placeholder="Комментарий">';
+      : '<textarea class="comment-input" data-card-id="' + card.id + '" data-op-id="' + op.id + '" maxlength="40" rows="1" placeholder="Комментарий">' + escapeHtml(op.comment || '') + '</textarea>';
 
     html += '<tr data-row-id="' + rowId + '">' +
       '<td>' + escapeHtml(op.opName) + '</td>' +
@@ -853,8 +866,8 @@ function buildOperationsTable(card, { readonly = false } = {}) {
       '<td>' + statusBadge(op.status) + '</td>' +
       '<td>' + (op.plannedMinutes || '') + '</td>' +
       '<td>' + timeCell + '</td>' +
-      '<td>' + commentCell + '</td>' +
       (readonly ? '' : '<td><div class="table-actions">' + actionsHtml + '</div></td>') +
+      '<td>' + commentCell + '</td>' +
       '</tr>';
   });
 
@@ -868,6 +881,10 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
   if (!cardsWithOps.length) {
     wrapper.innerHTML = '<p>Маршрутных операций пока нет.</p>';
     return;
+  }
+
+  if (collapseAll) {
+    workorderOpenCards.clear();
   }
 
   const termRaw = workorderSearchTerm.trim();
@@ -897,21 +914,24 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
 
   let html = '';
   filteredBySearch.forEach(card => {
-    const opened = false;
+    const opened = !collapseAll && workorderOpenCards.has(card.id);
     const stateBadge = renderCardStateBadge(card);
     const canArchive = card.status === 'DONE';
-    html += '<details class="wo-card"' + (opened ? ' open' : '') + '>' +
+    const barcodeInline = card.barcode
+      ? ' • № карты: <span class="summary-barcode">' + escapeHtml(card.barcode) + ' <button type="button" class="btn-small btn-secondary wo-barcode-btn" data-card-id="' + card.id + '">Штрихкод</button></span>'
+      : '';
+
+    html += '<details class="wo-card" data-card-id="' + card.id + '"' + (opened ? ' open' : '') + '>' +
       '<summary>' +
       '<div class="summary-line">' +
       '<div class="summary-text">' +
       '<strong>' + escapeHtml(card.name || card.id) + '</strong>' +
       ' <span class="summary-sub">' +
       (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') +
-      (card.barcode ? ' • № карты: ' + escapeHtml(card.barcode) : '') +
+      barcodeInline +
       '</span>' +
       '</div>' +
       '<div class="summary-actions">' +
-      (card.barcode ? ' <button type="button" class="btn-small btn-secondary wo-barcode-btn" data-card-id="' + card.id + '">Штрихкод</button>' : '') +
       ' ' + stateBadge +
       (canArchive ? ' <button type="button" class="btn-small btn-secondary archive-move-btn" data-card-id="' + card.id + '">Перенести в архив</button>' : '') +
       '</div>' +
@@ -923,6 +943,21 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
   });
 
   wrapper.innerHTML = html;
+
+  wrapper.querySelectorAll('.wo-card').forEach(detail => {
+    const cardId = detail.getAttribute('data-card-id');
+    if (detail.open && cardId) {
+      workorderOpenCards.add(cardId);
+    }
+    detail.addEventListener('toggle', () => {
+      if (!cardId) return;
+      if (detail.open) {
+        workorderOpenCards.add(cardId);
+      } else {
+        workorderOpenCards.delete(cardId);
+      }
+    });
+  });
 
   wrapper.querySelectorAll('.wo-barcode-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -945,15 +980,19 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
   });
 
   wrapper.querySelectorAll('.comment-input').forEach(input => {
-    input.addEventListener('change', e => {
+    autoResizeComment(input);
+    input.addEventListener('input', e => {
       const cardId = input.getAttribute('data-card-id');
       const opId = input.getAttribute('data-op-id');
       const card = cards.find(c => c.id === cardId);
       const op = card ? (card.operations || []).find(o => o.id === opId) : null;
       if (!op) return;
-      op.comment = e.target.value;
+      const value = (e.target.value || '').slice(0, 40);
+      e.target.value = value;
+      op.comment = value;
       saveData();
       renderDashboard();
+      autoResizeComment(e.target);
     });
   });
 
@@ -966,6 +1005,10 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       if (!card) return;
       const op = (card.operations || []).find(o => o.id === opId);
       if (!op) return;
+      const detail = btn.closest('.wo-card');
+      if (detail && detail.open) {
+        workorderOpenCards.add(cardId);
+      }
 
       if (action === 'start') {
         op.status = 'IN_PROGRESS';
@@ -1044,6 +1087,10 @@ function renderArchiveTable() {
   let html = '';
   filteredBySearch.forEach(card => {
     const stateBadge = renderCardStateBadge(card);
+    const barcodeInline = card.barcode
+      ? ' • № карты: <span class="summary-barcode">' + escapeHtml(card.barcode) + ' <button type="button" class="btn-small btn-secondary wo-barcode-btn" data-card-id="' + card.id + '">Штрихкод</button></span>'
+      : '';
+
     html += '<details class="wo-card">' +
       '<summary>' +
       '<div class="summary-line">' +
@@ -1051,11 +1098,10 @@ function renderArchiveTable() {
       '<strong>' + escapeHtml(card.name || card.id) + '</strong>' +
       ' <span class="summary-sub">' +
       (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') +
-      (card.barcode ? ' • № карты: ' + escapeHtml(card.barcode) : '') +
+      barcodeInline +
       '</span>' +
       '</div>' +
       '<div class="summary-actions">' +
-      (card.barcode ? ' <button type="button" class="btn-small btn-secondary wo-barcode-btn" data-card-id="' + card.id + '">Штрихкод</button>' : '') +
       ' ' + stateBadge +
       ' <button type="button" class="btn-small btn-secondary repeat-card-btn" data-card-id="' + card.id + '">Повторить</button>' +
       '</div>' +
