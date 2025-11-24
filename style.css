@@ -45,6 +45,29 @@ nav {
   background: #10b981;
 }
 
+.status-banner {
+  margin: 0;
+  padding: 10px 16px;
+  text-align: center;
+  font-size: 13px;
+  background: #e0f2fe;
+  color: #075985;
+}
+
+.status-banner.status-error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.status-banner.status-info {
+  background: #e0f2fe;
+  color: #075985;
+}
+
+.hidden {
+  display: none;
+}
+
 main {
   padding: 16px;
   max-width: 1200px;
@@ -261,6 +284,115 @@ footer {
   font-size: 11px;
   color: #6b7280;
   padding: 12px 8px 20px;
+}
+
+.wo-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  margin-bottom: 12px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.wo-card summary {
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.wo-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.wo-card table {
+  margin: 0;
+  border: 0;
+}
+
+.summary-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.summary-text {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.summary-sub {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.summary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  border: 1px solid transparent;
+}
+
+.status-pill-not-started {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.status-pill-in-progress {
+  background: #d1fae5;
+  color: #065f46;
+  border-color: #10b981;
+}
+
+.status-pill-paused {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #facc15;
+}
+
+.status-pill-mixed {
+  background: linear-gradient(90deg, #fef3c7 0%, #fef3c7 50%, #d1fae5 50%, #d1fae5 100%);
+  color: #065f46;
+  border-color: #10b981;
+}
+
+.status-pill-done {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid #10b981;
+  background: #fff;
+  color: #10b981;
+  font-weight: 700;
+}
+
+.comment-input {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+}
+
+.comment-readonly {
+  min-height: 20px;
+  padding: 4px 2px;
+  color: #374151;
 }
 
 /* Дашборд – отображение операций */

@@ -14,8 +14,11 @@
       <button class="nav-btn" data-target="cards">Тех. карты</button>
       <button class="nav-btn" data-target="directory">Операции и участки</button>
       <button class="nav-btn" data-target="workorders">Маршрутные квитанции</button>
+      <button class="nav-btn" data-target="archive">Архив</button>
     </nav>
   </header>
+
+  <div id="server-status" class="status-banner status-info hidden" role="status" aria-live="polite"></div>
 
   <main>
     <!-- Дашборд -->
@@ -150,6 +153,17 @@
             <label for="workorder-search">Поиск техкарты (№ карты, название, заказ)</label>
             <input id="workorder-search" placeholder="Введите № EAN-13, название или номер заказа" />
           </div>
+          <div class="flex-col" style="flex:0 1 200px;">
+            <label for="workorder-status">Статус карты</label>
+            <select id="workorder-status">
+              <option value="ALL">Все</option>
+              <option value="NOT_STARTED">Не запущена</option>
+              <option value="IN_PROGRESS">Выполняется</option>
+              <option value="PAUSED">Пауза</option>
+              <option value="MIXED">Смешанно</option>
+              <option value="DONE">Выполнено</option>
+            </select>
+          </div>
           <div class="flex-col" style="flex:0 0 auto;">
             <button class="btn-secondary" id="workorder-search-clear">Сбросить</button>
           </div>
@@ -160,6 +174,37 @@
           <strong>«Продолжить»</strong>, после завершения — <strong>«Завершить»</strong>.
         </p>
         <div id="workorders-table-wrapper"></div>
+      </div>
+    </section>
+
+    <!-- Архив -->
+    <section id="archive">
+      <div class="card">
+        <h2>Архив маршрутных карт</h2>
+        <div class="flex" style="margin-bottom:8px; align-items:flex-end;">
+          <div class="flex-col" style="flex:1 1 260px;">
+            <label for="archive-search">Поиск в архиве (№ карты, название, заказ)</label>
+            <input id="archive-search" placeholder="Введите № EAN-13, название или номер заказа" />
+          </div>
+          <div class="flex-col" style="flex:0 1 200px;">
+            <label for="archive-status">Статус карты</label>
+            <select id="archive-status">
+              <option value="ALL">Все</option>
+              <option value="NOT_STARTED">Не запущена</option>
+              <option value="IN_PROGRESS">Выполняется</option>
+              <option value="PAUSED">Пауза</option>
+              <option value="MIXED">Смешанно</option>
+              <option value="DONE">Выполнено</option>
+            </select>
+          </div>
+          <div class="flex-col" style="flex:0 0 auto;">
+            <button class="btn-secondary" id="archive-search-clear">Сбросить</button>
+          </div>
+        </div>
+        <p style="font-size:12px; color:#6b7280; margin-top:0;">
+          Архивные карты доступны только для просмотра. При необходимости нажмите «Повторить», чтобы создать копию и перезапустить процесс.
+        </p>
+        <div id="archive-table-wrapper"></div>
       </div>
     </section>
   </main>

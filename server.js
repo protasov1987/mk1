@@ -62,7 +62,8 @@ function createRouteOpFromRefs(op, center, executor, plannedMinutes, order) {
     finishedAt: null,
     actualSeconds: null,
     elapsedSeconds: 0,
-    order: order || 1
+    order: order || 1,
+    comment: ''
   };
 }
 
@@ -88,6 +89,7 @@ function buildDefaultData() {
       orderNo: 'DEMO-001',
       desc: 'Демонстрационная карта для примера.',
       status: 'NOT_STARTED',
+      archived: false,
       operations: [
         createRouteOpFromRefs(ops[0], centers[0], 'Иванов И.И.', 40, 1),
         createRouteOpFromRefs(ops[1], centers[1], 'Петров П.П.', 60, 2),
@@ -189,8 +191,10 @@ function normalizeCard(card) {
     elapsedSeconds: typeof op.elapsedSeconds === 'number' ? op.elapsedSeconds : (op.actualSeconds || 0),
     startedAt: op.startedAt || null,
     finishedAt: op.finishedAt || null,
-    status: op.status || 'NOT_STARTED'
+    status: op.status || 'NOT_STARTED',
+    comment: typeof op.comment === 'string' ? op.comment : ''
   }));
+  safeCard.archived = Boolean(safeCard.archived);
   recalcCardStatus(safeCard);
   return safeCard;
 }
