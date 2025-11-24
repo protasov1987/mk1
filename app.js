@@ -32,6 +32,21 @@ function genId(prefix) {
   return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 8);
 }
 
+function generateRawOpCode() {
+  return 'OP-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+}
+
+function generateUniqueOpCode(used = new Set()) {
+  let code = generateRawOpCode();
+  let attempt = 0;
+  const taken = new Set(used);
+  while ((taken.has(code) || !code) && attempt < 1000) {
+    code = generateRawOpCode();
+    attempt++;
+  }
+  return code;
+}
+
 function escapeHtml(str) {
   if (str == null) return '';
   return String(str)
@@ -249,6 +264,7 @@ function createRouteOpFromRefs(op, center, executor, plannedMinutes, order) {
   return {
     id: genId('rop'),
     opId: op.id,
+    opCode: op.code || op.opCode || generateUniqueOpCode(collectUsedOpCodes()),
     opName: op.name,
     centerId: center.id,
     centerName: center.name,
@@ -302,13 +318,13 @@ function cardStatusText(card) {
   const inProgress = opsArr.find(o => o.status === 'IN_PROGRESS');
   if (inProgress) {
     const sec = getOperationElapsedSeconds(inProgress);
-    return inProgress.opName + ' (' + formatSecondsToHMS(sec) + ')';
+    return formatOpLabel(inProgress) + ' (' + formatSecondsToHMS(sec) + ')';
   }
 
   const paused = opsArr.find(o => o.status === 'PAUSED');
   if (paused) {
     const sec = getOperationElapsedSeconds(paused);
-    return paused.opName + ' (пауза ' + formatSecondsToHMS(sec) + ')';
+    return formatOpLabel(paused) + ' (пауза ' + formatSecondsToHMS(sec) + ')';
   }
 
   const allDone = opsArr.length > 0 && opsArr.every(o => o.status === 'DONE');
@@ -324,7 +340,7 @@ function cardStatusText(card) {
       const newOrder = typeof o.order === 'number' ? o.order : 999999;
       if (newOrder < curOrder) next = o;
     });
-    return next.opName + ' (ожидание)';
+    return formatOpLabel(next) + ' (ожидание)';
   }
 
   return 'Не запущена';
@@ -369,6 +385,59 @@ function getCardComment(card) {
   return fallback ? fallback.comment : '';
 }
 
+function formatOpLabel(op) {
+  const code = op.opCode || op.code || '';
+  const name = op.opName || op.name || '';
+  return code ? `[${code}] ${name}` : name;
+}
+
+function renderOpLabel(op) {
+  return escapeHtml(formatOpLabel(op));
+}
+
+function collectUsedOpCodes() {
+  const used = new Set();
+  ops.forEach(o => {
+    if (o.code) used.add(o.code);
+  });
+  cards.forEach(card => {
+    (card.operations || []).forEach(op => {
+      if (op.opCode) used.add(op.opCode);
+    });
+  });
+  return used;
+}
+
+function ensureOperationCodes() {
+  const used = collectUsedOpCodes();
+  ops = ops.map(op => {
+    const next = { ...op };
+    if (!next.code || used.has(next.code)) {
+      next.code = generateUniqueOpCode(used);
+    }
+    used.add(next.code);
+    return next;
+  });
+
+  const opMap = Object.fromEntries(ops.map(op => [op.id, op]));
+  cards = cards.map(card => {
+    const clonedCard = { ...card };
+    clonedCard.operations = (clonedCard.operations || []).map(op => {
+      const next = { ...op };
+      const source = next.opId ? opMap[next.opId] : null;
+      if (source && source.code) {
+        next.opCode = source.code;
+      }
+      if (!next.opCode || used.has(next.opCode)) {
+        next.opCode = generateUniqueOpCode(used);
+      }
+      used.add(next.opCode);
+      return next;
+    });
+    return clonedCard;
+  });
+}
+
 // === ХРАНИЛИЩЕ ===
 async function saveData() {
   try {
@@ -403,10 +472,11 @@ function ensureDefaults() {
   }
 
   if (!ops.length) {
+    const used = new Set();
     ops = [
-      { id: genId('op'), name: 'Токарная обработка', desc: 'Черновая и чистовая', recTime: 40 },
-      { id: genId('op'), name: 'Напыление покрытия', desc: 'HVOF / APS', recTime: 60 },
-      { id: genId('op'), name: 'Контроль размеров', desc: 'Измерения, оформление протокола', recTime: 20 }
+      { id: genId('op'), code: generateUniqueOpCode(used), name: 'Токарная обработка', desc: 'Черновая и чистовая', recTime: 40 },
+      { id: genId('op'), code: generateUniqueOpCode(used), name: 'Напыление покрытия', desc: 'HVOF / APS', recTime: 60 },
+      { id: genId('op'), code: generateUniqueOpCode(used), name: 'Контроль размеров', desc: 'Измерения, оформление протокола', recTime: 20 }
     ];
   }
 
@@ -457,6 +527,7 @@ async function loadData() {
   }
 
   ensureDefaults();
+  ensureOperationCodes();
 
   cards.forEach(c => {
     if (!c.barcode || !/^\d{13}$/.test(c.barcode)) {
@@ -539,7 +610,7 @@ function renderDashboard() {
           cls += ' dash-op-overdue';
         }
         statusHtml += '<span class="' + cls + '">' +
-          escapeHtml(op.opName) + ' — ' + formatSecondsToHMS(elapsed) +
+          renderOpLabel(op) + ' — ' + formatSecondsToHMS(elapsed) +
           '</span>';
       });
     } else {
@@ -552,7 +623,7 @@ function renderDashboard() {
           if (newOrder < curOrder) next = o;
         });
         opsForDisplay = [next];
-        statusHtml = escapeHtml(next.opName) + ' (ожидание)';
+        statusHtml = renderOpLabel(next) + ' (ожидание)';
       } else {
         statusHtml = 'Не запущена';
       }
@@ -561,7 +632,7 @@ function renderDashboard() {
     const completedCount = opsArr.filter(o => o.status === 'DONE').length;
     const commentLines = opsForDisplay
       .filter(o => o.comment)
-      .map(o => '<div class="dash-comment-line"><span class="dash-comment-op">' + escapeHtml(o.opName) + ':</span> ' + escapeHtml(o.comment) + '</div>');
+      .map(o => '<div class="dash-comment-line"><span class="dash-comment-op">' + renderOpLabel(o) + ':</span> ' + escapeHtml(o.comment) + '</div>');
     const commentCell = commentLines.join('');
 
     html += '<tr>' +
@@ -745,12 +816,13 @@ function renderRouteTableDraft() {
   }
   const sortedOps = [...opsArr].sort((a, b) => (a.order || 0) - (b.order || 0));
   let html = '<table><thead><tr>' +
-    '<th>Порядок</th><th>Операция</th><th>Участок</th><th>Исполнитель</th><th>План (мин)</th><th>Статус</th><th>Действия</th>' +
+    '<th>Порядок</th><th>Код операции</th><th>Операция</th><th>Участок</th><th>Исполнитель</th><th>План (мин)</th><th>Статус</th><th>Действия</th>' +
     '</tr></thead><tbody>';
   sortedOps.forEach((o, index) => {
     html += '<tr data-rop-id="' + o.id + '">' +
       '<td>' + (index + 1) + '</td>' +
-      '<td>' + escapeHtml(o.opName) + '</td>' +
+      '<td>' + escapeHtml(o.opCode || '') + '</td>' +
+      '<td>' + renderOpLabel(o) + '</td>' +
       '<td>' + escapeHtml(o.centerName) + '</td>' +
       '<td>' + escapeHtml(o.executor || '') + '</td>' +
       '<td>' + (o.plannedMinutes || '') + '</td>' +
@@ -804,7 +876,7 @@ function fillRouteSelectors() {
   ops.forEach(o => {
     const opt = document.createElement('option');
     opt.value = o.id;
-    opt.textContent = o.name;
+    opt.textContent = o.code ? `${o.code} — ${o.name}` : o.name;
     opSelect.appendChild(opt);
   });
   centers.forEach(c => {
@@ -851,9 +923,10 @@ function renderOpsTable() {
     wrapper.innerHTML = '<p>Список операций пуст.</p>';
     return;
   }
-  let html = '<table><thead><tr><th>Название</th><th>Описание</th><th>Рек. время (мин)</th><th>Действия</th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th>Код операции</th><th>Название</th><th>Описание</th><th>Рек. время (мин)</th><th>Действия</th></tr></thead><tbody>';
   ops.forEach(o => {
     html += '<tr>' +
+      '<td>' + escapeHtml(o.code || '') + '</td>' +
       '<td>' + escapeHtml(o.name) + '</td>' +
       '<td>' + escapeHtml(o.desc || '') + '</td>' +
       '<td>' + (o.recTime || '') + '</td>' +
@@ -902,7 +975,7 @@ function cardSearchScore(card, term) {
 
 function buildOperationsTable(card, { readonly = false } = {}) {
   let html = '<table><thead><tr>' +
-    '<th>Операция</th><th>Участок</th><th>Исполнитель</th><th>Статус</th><th>План (мин)</th><th>Текущее / факт. время</th>' +
+    '<th>Код операции</th><th>Операция</th><th>Участок</th><th>Исполнитель</th><th>Статус</th><th>План (мин)</th><th>Текущее / факт. время</th>' +
     (readonly ? '' : '<th>Действия</th>') +
     '<th>Комментарии</th>' +
     '</tr></thead><tbody>';
@@ -943,7 +1016,8 @@ function buildOperationsTable(card, { readonly = false } = {}) {
       : '<textarea class="comment-input" data-card-id="' + card.id + '" data-op-id="' + op.id + '" maxlength="40" rows="1" placeholder="Комментарий">' + escapeHtml(op.comment || '') + '</textarea>';
 
     html += '<tr data-row-id="' + rowId + '">' +
-      '<td>' + escapeHtml(op.opName) + '</td>' +
+      '<td>' + escapeHtml(op.opCode || '') + '</td>' +
+      '<td>' + renderOpLabel(op) + '</td>' +
       '<td>' + escapeHtml(op.centerName) + '</td>' +
       '<td>' + escapeHtml(op.executor || '') + '</td>' +
       '<td>' + statusBadge(op.status) + '</td>' +
@@ -1347,18 +1421,19 @@ function setupForms() {
     e.target.reset();
   });
 
-  document.getElementById('op-form').addEventListener('submit', e => {
-    e.preventDefault();
-    const name = document.getElementById('op-name').value.trim();
-    const desc = document.getElementById('op-desc').value.trim();
-    const time = parseInt(document.getElementById('op-time').value, 10) || 30;
-    if (!name) return;
-    ops.push({ id: genId('op'), name: name, desc: desc, recTime: time });
-    saveData();
-    renderOpsTable();
-    fillRouteSelectors();
-    e.target.reset();
-  });
+      document.getElementById('op-form').addEventListener('submit', e => {
+        e.preventDefault();
+        const name = document.getElementById('op-name').value.trim();
+        const desc = document.getElementById('op-desc').value.trim();
+        const time = parseInt(document.getElementById('op-time').value, 10) || 30;
+        if (!name) return;
+        const used = collectUsedOpCodes();
+        ops.push({ id: genId('op'), code: generateUniqueOpCode(used), name: name, desc: desc, recTime: time });
+        saveData();
+        renderOpsTable();
+        fillRouteSelectors();
+        e.target.reset();
+      });
 
   const searchInput = document.getElementById('workorder-search');
   const searchClearBtn = document.getElementById('workorder-search-clear');

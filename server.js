@@ -48,10 +48,25 @@ function generateUniqueEAN13(cards) {
   return generateEAN13();
 }
 
+function generateRawOpCode() {
+  return `OP-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+}
+
+function generateUniqueOpCode(used = new Set()) {
+  let code = generateRawOpCode();
+  let attempt = 0;
+  while (used.has(code) && attempt < 1000) {
+    code = generateRawOpCode();
+    attempt++;
+  }
+  return code;
+}
+
 function createRouteOpFromRefs(op, center, executor, plannedMinutes, order) {
   return {
     id: genId('rop'),
     opId: op.id,
+    opCode: op.code || op.opCode || generateUniqueOpCode(),
     opName: op.name,
     centerId: center.id,
     centerName: center.name,
@@ -74,10 +89,11 @@ function buildDefaultData() {
     { id: genId('wc'), name: 'Контроль качества', desc: 'Измерения, контроль, визуальный осмотр' }
   ];
 
+  const used = new Set();
   const ops = [
-    { id: genId('op'), name: 'Токарная обработка', desc: 'Черновая и чистовая', recTime: 40 },
-    { id: genId('op'), name: 'Напыление покрытия', desc: 'HVOF / APS', recTime: 60 },
-    { id: genId('op'), name: 'Контроль размеров', desc: 'Измерения, оформление протокола', recTime: 20 }
+    { id: genId('op'), code: generateUniqueOpCode(used), name: 'Токарная обработка', desc: 'Черновая и чистовая', recTime: 40 },
+    { id: genId('op'), code: generateUniqueOpCode(used), name: 'Напыление покрытия', desc: 'HVOF / APS', recTime: 60 },
+    { id: genId('op'), code: generateUniqueOpCode(used), name: 'Контроль размеров', desc: 'Измерения, оформление протокола', recTime: 20 }
   ];
 
   const cardId = genId('card');
@@ -188,6 +204,7 @@ function normalizeCard(card) {
   const safeCard = deepClone(card);
   safeCard.operations = (safeCard.operations || []).map(op => ({
     ...op,
+    opCode: op.opCode || '',
     elapsedSeconds: typeof op.elapsedSeconds === 'number' ? op.elapsedSeconds : (op.actualSeconds || 0),
     startedAt: op.startedAt || null,
     finishedAt: op.finishedAt || null,
@@ -199,12 +216,46 @@ function normalizeCard(card) {
   return safeCard;
 }
 
+function ensureOperationCodes(data) {
+  const used = new Set();
+
+  data.ops = data.ops.map(op => {
+    const next = { ...op };
+    if (!next.code || used.has(next.code)) {
+      next.code = generateUniqueOpCode(used);
+    }
+    used.add(next.code);
+    return next;
+  });
+
+  const opMap = Object.fromEntries(data.ops.map(op => [op.id, op]));
+
+  data.cards = data.cards.map(card => {
+    const nextCard = { ...card };
+    nextCard.operations = (nextCard.operations || []).map(op => {
+      const nextOp = { ...op };
+      const source = nextOp.opId ? opMap[nextOp.opId] : null;
+      if (source && source.code) {
+        nextOp.opCode = source.code;
+      }
+      if (!nextOp.opCode || used.has(nextOp.opCode)) {
+        nextOp.opCode = generateUniqueOpCode(used);
+      }
+      used.add(nextOp.opCode);
+      return nextOp;
+    });
+    recalcCardStatus(nextCard);
+    return nextCard;
+  });
+}
+
 function normalizeData(payload) {
   const safe = {
     cards: Array.isArray(payload.cards) ? payload.cards.map(normalizeCard) : [],
     ops: Array.isArray(payload.ops) ? payload.ops : [],
     centers: Array.isArray(payload.centers) ? payload.centers : []
   };
+  ensureOperationCodes(safe);
   safe.cards = safe.cards.map(card => {
     if (!card.barcode || !/^\d{13}$/.test(card.barcode)) {
       card.barcode = generateUniqueEAN13(safe.cards);
