@@ -20,18 +20,20 @@ header {
   flex-wrap: wrap;
 }
 
-.header-meta {
-  margin-left: auto;
+.header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .clock-display {
   font-weight: 600;
   padding: 6px 10px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.1);
-  color: #e5e7eb;
-  min-width: 180px;
-  text-align: right;
+  background: #fff;
+  color: #000;
+  min-width: 200px;
+  text-align: left;
 }
 
 header h1 {
@@ -43,6 +45,7 @@ nav {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  margin-left: auto;
 }
 
 .nav-btn {

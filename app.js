@@ -39,7 +39,9 @@ function startRealtimeClock() {
   if (!el) return;
   const update = () => {
     const now = new Date();
-    el.textContent = now.toLocaleString();
+    const date = now.toLocaleDateString('ru-RU');
+    const time = now.toLocaleTimeString('ru-RU');
+    el.textContent = `${date} ${time}`;
   };
   update();
   if (clockIntervalId) clearInterval(clockIntervalId);
@@ -1649,7 +1651,7 @@ function cardSearchScore(card, term) {
 function buildOperationsTable(card, { readonly = false } = {}) {
   const opsSorted = [...(card.operations || [])].sort((a, b) => (a.order || 0) - (b.order || 0));
   let html = '<table><thead><tr>' +
-    '<th>Порядок</th><th>Участок</th><th>Код операции</th><th>Операция</th><th>Исполнитель</th><th>План (мин)</th><th>Статус</th><th>Дата и время Н/К</th><th>Текущее / факт. время</th>' +
+    '<th>Порядок</th><th>Участок</th><th>Код операции</th><th>Операция</th><th>Исполнитель</th><th>План (мин)</th><th>Статус</th><th>Текущее / факт. время</th>' +
     (readonly ? '' : '<th>Действия</th>') +
     '<th>Комментарии</th>' +
     '</tr></thead><tbody>';
@@ -1689,7 +1691,6 @@ function buildOperationsTable(card, { readonly = false } = {}) {
       ? '<div class="comment-readonly">' + escapeHtml(op.comment || '') + '</div>'
       : '<textarea class="comment-input" data-card-id="' + card.id + '" data-op-id="' + op.id + '" maxlength="40" rows="1" placeholder="Комментарий">' + escapeHtml(op.comment || '') + '</textarea>';
 
-    const startEndCell = formatStartEnd(op);
     const actionsCell = readonly
       ? ''
       : '<td><div class="table-actions">' + actionsHtml + '</div></td>';
@@ -1702,7 +1703,6 @@ function buildOperationsTable(card, { readonly = false } = {}) {
       '<td>' + escapeHtml(op.executor || '') + '</td>' +
       '<td>' + (op.plannedMinutes || '') + '</td>' +
       '<td>' + statusBadge(op.status) + '</td>' +
-      '<td>' + startEndCell + '</td>' +
       '<td>' + timeCell + '</td>' +
       actionsCell +
       '<td>' + commentCell + '</td>' +
