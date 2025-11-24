@@ -108,6 +108,9 @@ function buildDefaultData() {
       desc: 'Демонстрационная карта для примера.',
       status: 'NOT_STARTED',
       archived: false,
+      createdAt: Date.now(),
+      logs: [],
+      initialSnapshot: null,
       attachments: [],
       operations: [
         createRouteOpFromRefs(ops[0], centers[0], 'Иванов И.И.', 40, 1),
@@ -215,6 +218,20 @@ function normalizeCard(card) {
     comment: typeof op.comment === 'string' ? op.comment : ''
   }));
   safeCard.archived = Boolean(safeCard.archived);
+  safeCard.createdAt = typeof safeCard.createdAt === 'number' ? safeCard.createdAt : Date.now();
+  safeCard.logs = Array.isArray(safeCard.logs)
+    ? safeCard.logs.map(entry => ({
+      id: entry.id || genId('log'),
+      ts: typeof entry.ts === 'number' ? entry.ts : Date.now(),
+      action: entry.action || 'update',
+      object: entry.object || '',
+      targetId: entry.targetId || null,
+      field: entry.field || null,
+      oldValue: entry.oldValue != null ? entry.oldValue : '',
+      newValue: entry.newValue != null ? entry.newValue : ''
+    }))
+    : [];
+  safeCard.initialSnapshot = safeCard.initialSnapshot || null;
   safeCard.attachments = Array.isArray(safeCard.attachments)
     ? safeCard.attachments.map(file => ({
       id: file.id || genId('file'),

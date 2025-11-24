@@ -332,6 +332,94 @@ tbody tr:nth-child(even) {
   flex-wrap: wrap;
 }
 
+.log-content {
+  max-width: 1100px;
+}
+
+.log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.log-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.log-card-header {
+  display: grid;
+  grid-template-columns: minmax(200px, 260px) 1fr;
+  gap: 16px;
+  align-items: center;
+}
+
+.log-barcode-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  border: 1px dashed #d1d5db;
+  padding: 8px;
+  border-radius: 8px;
+  background: #f9fafb;
+}
+
+.log-barcode-number {
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.log-card-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 6px 12px;
+  font-size: 13px;
+}
+
+.log-section h4 {
+  margin: 0 0 8px;
+}
+
+.log-section {
+  border-top: 1px solid #e5e7eb;
+  padding-top: 10px;
+}
+
+.log-section table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.log-section th,
+.log-section td {
+  border: 1px solid #e5e7eb;
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.log-section thead {
+  background: #f3f4f6;
+}
+
+.log-summary-actions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.log-initial-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 6px 12px;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
 .hidden-input {
   display: none;
 }

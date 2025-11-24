@@ -258,6 +258,44 @@
     </div>
   </div>
 
+  <div id="log-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="log-title">
+    <div class="modal-content log-content">
+      <div class="modal-header log-header">
+        <h3 id="log-title">История изменений маршрутной карты</h3>
+        <button type="button" id="log-close" class="btn-secondary">Закрыть</button>
+      </div>
+      <div class="modal-body log-body">
+        <div class="log-card-header">
+          <div class="log-barcode-block">
+            <canvas id="log-barcode-canvas"></canvas>
+            <div class="log-barcode-number" id="log-barcode-number"></div>
+          </div>
+          <div class="log-card-meta">
+            <div><strong>Наименование:</strong> <span id="log-card-name"></span></div>
+            <div><strong>Заказ:</strong> <span id="log-card-order"></span></div>
+            <div><strong>Статус:</strong> <span id="log-card-status"></span></div>
+            <div><strong>Создана:</strong> <span id="log-card-created"></span></div>
+          </div>
+        </div>
+        <div class="log-section">
+          <h4>Вид карты при создании</h4>
+          <div id="log-initial-view"></div>
+        </div>
+        <div class="log-section">
+          <h4>История изменений</h4>
+          <div id="log-history-table"></div>
+        </div>
+        <div class="log-section">
+          <h4>Сводная таблица операций</h4>
+          <div id="log-summary-table"></div>
+          <div class="log-summary-actions">
+            <button type="button" id="log-print-summary" class="btn-primary">Печать сводной таблицы</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Модальное окно для штрихкода -->
   <div id="barcode-modal" class="barcode-modal">
     <div class="barcode-modal-content">

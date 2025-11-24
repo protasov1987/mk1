@@ -18,6 +18,7 @@ let cardsSearchTerm = '';
 let attachmentContext = null;
 const ATTACH_ACCEPT = '.pdf,.doc,.docx,.jpg,.jpeg,.png,.zip,.rar,.7z';
 const ATTACH_MAX_SIZE = 15 * 1024 * 1024; // 15 MB
+let logContextCardId = null;
 
 function setConnectionStatus(message, variant = 'info') {
   const banner = document.getElementById('server-status');
@@ -103,6 +104,51 @@ function ensureAttachments(card) {
     content: typeof file.content === 'string' ? file.content : '',
     createdAt: file.createdAt || Date.now()
   }));
+}
+
+function ensureCardMeta(card) {
+  if (!card) return;
+  if (typeof card.createdAt !== 'number') {
+    card.createdAt = Date.now();
+  }
+  if (!Array.isArray(card.logs)) {
+    card.logs = [];
+  }
+  if (!card.initialSnapshot) {
+    const snapshot = cloneCard(card);
+    snapshot.logs = [];
+    card.initialSnapshot = snapshot;
+  }
+}
+
+function formatLogValue(val) {
+  if (val === undefined || val === null) return '';
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number' || typeof val === 'boolean') return String(val);
+  try {
+    return JSON.stringify(val);
+  } catch (err) {
+    return String(val);
+  }
+}
+
+function recordCardLog(card, { action, object, field = null, targetId = null, oldValue = '', newValue = '' }) {
+  if (!card) return;
+  ensureCardMeta(card);
+  card.logs.push({
+    id: genId('log'),
+    ts: Date.now(),
+    action: action || 'update',
+    object: object || '',
+    field,
+    targetId,
+    oldValue: formatLogValue(oldValue),
+    newValue: formatLogValue(newValue)
+  });
+}
+
+function opLogLabel(op) {
+  return formatOpLabel(op) || 'Операция';
 }
 
 function dataUrlToBlob(dataUrl, fallbackType = 'application/octet-stream') {
@@ -584,6 +630,7 @@ async function loadData() {
     }
     c.archived = Boolean(c.archived);
     ensureAttachments(c);
+    ensureCardMeta(c);
     c.operations = c.operations || [];
     c.operations.forEach(op => {
       if (typeof op.elapsedSeconds !== 'number') {
@@ -790,6 +837,9 @@ function duplicateCard(cardId) {
   copy.name = (card.name || '') + ' (копия)';
   copy.status = 'NOT_STARTED';
   copy.archived = false;
+  copy.logs = [];
+  copy.createdAt = Date.now();
+  copy.initialSnapshot = null;
   copy.attachments = (copy.attachments || []).map(file => ({
     ...file,
     id: genId('file'),
@@ -807,6 +857,13 @@ function duplicateCard(cardId) {
     order: typeof op.order === 'number' ? op.order : idx + 1
   }));
   recalcCardStatus(copy);
+  ensureCardMeta(copy);
+  if (!copy.initialSnapshot) {
+    const snapshot = cloneCard(copy);
+    snapshot.logs = [];
+    copy.initialSnapshot = snapshot;
+  }
+  recordCardLog(copy, { action: 'Создание копии', object: 'Карта', oldValue: card.barcode || '', newValue: copy.barcode || '' });
   cards.push(copy);
   saveData();
   renderEverything();
@@ -821,6 +878,9 @@ function createEmptyCardDraft() {
     desc: '',
     status: 'NOT_STARTED',
     archived: false,
+    createdAt: Date.now(),
+    logs: [],
+    initialSnapshot: null,
     attachments: [],
     operations: []
   };
@@ -839,6 +899,7 @@ function openCardModal(cardId) {
     activeCardDraft = createEmptyCardDraft();
     activeCardIsNew = true;
   }
+  ensureCardMeta(activeCardDraft);
   document.getElementById('card-modal-title').textContent = activeCardIsNew ? 'Создание карты' : 'Редактирование карты';
   document.getElementById('card-id').value = activeCardDraft.id;
   document.getElementById('card-name').value = activeCardDraft.name || '';
@@ -879,17 +940,92 @@ function saveCardDraft() {
     order: typeof op.order === 'number' ? op.order : idx + 1
   }));
   recalcCardStatus(draft);
+
   if (activeCardIsNew || activeCardOriginalId == null) {
+    ensureCardMeta(draft);
+    if (!draft.initialSnapshot) {
+      const snapshot = cloneCard(draft);
+      snapshot.logs = [];
+      draft.initialSnapshot = snapshot;
+    }
+    recordCardLog(draft, { action: 'Создание карты', object: 'Карта', oldValue: '', newValue: draft.name || draft.barcode });
     cards.push(draft);
   } else {
     const idx = cards.findIndex(c => c.id === activeCardOriginalId);
     if (idx >= 0) {
+      const original = cloneCard(cards[idx]);
+      ensureCardMeta(original);
+      ensureCardMeta(draft);
+      draft.createdAt = original.createdAt || draft.createdAt;
+      draft.initialSnapshot = original.initialSnapshot || draft.initialSnapshot;
+      draft.logs = Array.isArray(original.logs) ? original.logs : [];
+      logCardDifferences(original, draft);
       cards[idx] = draft;
     }
   }
   saveData();
   renderEverything();
   closeCardModal();
+}
+
+function logCardDifferences(original, updated) {
+  if (!original || !updated) return;
+  const cardRef = updated;
+  const fields = ['name', 'orderNo', 'desc'];
+  fields.forEach(field => {
+    if ((original[field] || '') !== (updated[field] || '')) {
+      recordCardLog(cardRef, { action: 'Изменение поля', object: 'Карта', field, oldValue: original[field] || '', newValue: updated[field] || '' });
+    }
+  });
+
+  if (original.status !== updated.status) {
+    recordCardLog(cardRef, { action: 'Статус карты', object: 'Карта', field: 'status', oldValue: original.status, newValue: updated.status });
+  }
+
+  if (original.archived !== updated.archived) {
+    recordCardLog(cardRef, { action: 'Архивирование', object: 'Карта', field: 'archived', oldValue: original.archived, newValue: updated.archived });
+  }
+
+  const originalAttachments = Array.isArray(original.attachments) ? original.attachments.length : 0;
+  const updatedAttachments = Array.isArray(updated.attachments) ? updated.attachments.length : 0;
+  if (originalAttachments !== updatedAttachments) {
+    recordCardLog(cardRef, { action: 'Файлы', object: 'Карта', field: 'attachments', oldValue: originalAttachments, newValue: updatedAttachments });
+  }
+
+  const originalOps = Array.isArray(original.operations) ? original.operations : [];
+  const updatedOps = Array.isArray(updated.operations) ? updated.operations : [];
+  const originalMap = new Map(originalOps.map(op => [op.id, op]));
+  const updatedMap = new Map(updatedOps.map(op => [op.id, op]));
+
+  updatedOps.forEach(op => {
+    const prev = originalMap.get(op.id);
+    if (!prev) {
+      recordCardLog(cardRef, { action: 'Добавление операции', object: opLogLabel(op), targetId: op.id, oldValue: '', newValue: `${op.centerName || ''} / ${op.executor || ''}`.trim() });
+      return;
+    }
+
+    if ((prev.centerName || '') !== (op.centerName || '')) {
+      recordCardLog(cardRef, { action: 'Изменение операции', object: opLogLabel(op), field: 'centerName', targetId: op.id, oldValue: prev.centerName || '', newValue: op.centerName || '' });
+    }
+    if ((prev.opCode || '') !== (op.opCode || '') || (prev.opName || '') !== (op.opName || '')) {
+      recordCardLog(cardRef, { action: 'Изменение операции', object: opLogLabel(op), field: 'operation', targetId: op.id, oldValue: opLogLabel(prev), newValue: opLogLabel(op) });
+    }
+    if ((prev.executor || '') !== (op.executor || '')) {
+      recordCardLog(cardRef, { action: 'Исполнитель', object: opLogLabel(op), field: 'executor', targetId: op.id, oldValue: prev.executor || '', newValue: op.executor || '' });
+    }
+    if ((prev.plannedMinutes || 0) !== (op.plannedMinutes || 0)) {
+      recordCardLog(cardRef, { action: 'Плановое время', object: opLogLabel(op), field: 'plannedMinutes', targetId: op.id, oldValue: prev.plannedMinutes || 0, newValue: op.plannedMinutes || 0 });
+    }
+    if ((prev.order || 0) !== (op.order || 0)) {
+      recordCardLog(cardRef, { action: 'Порядок операции', object: opLogLabel(op), field: 'order', targetId: op.id, oldValue: prev.order || 0, newValue: op.order || 0 });
+    }
+  });
+
+  originalOps.forEach(op => {
+    if (!updatedMap.has(op.id)) {
+      recordCardLog(cardRef, { action: 'Удаление операции', object: opLogLabel(op), targetId: op.id, oldValue: `${op.centerName || ''} / ${op.executor || ''}`.trim(), newValue: '' });
+    }
+  });
 }
 
 function getAttachmentTargetCard() {
@@ -959,6 +1095,7 @@ async function addAttachmentsFromFiles(fileList) {
   const card = getAttachmentTargetCard();
   if (!card || !fileList || !fileList.length) return;
   ensureAttachments(card);
+  const beforeCount = card.attachments.length;
   const filesArray = Array.from(fileList);
   const allowed = ATTACH_ACCEPT.split(',').map(v => v.trim().toLowerCase()).filter(Boolean);
   const newFiles = [];
@@ -991,6 +1128,7 @@ async function addAttachmentsFromFiles(fileList) {
 
   if (newFiles.length) {
     card.attachments.push(...newFiles);
+    recordCardLog(card, { action: 'Файлы', object: 'Карта', field: 'attachments', oldValue: beforeCount, newValue: card.attachments.length });
     if (attachmentContext.source === 'live') {
       await saveData();
       renderEverything();
@@ -1031,6 +1169,178 @@ function updateAttachmentCounters(cardId) {
   const cardBtn = document.getElementById('card-attachments-btn');
   if (cardBtn && activeCardDraft && activeCardDraft.id === cardId) {
     cardBtn.innerHTML = '📎 Файлы (' + count + ')';
+  }
+}
+
+function buildLogHistoryTable(card) {
+  const logs = (card.logs || []).slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  if (!logs.length) return '<p>История изменений пока отсутствует.</p>';
+  let html = '<table><thead><tr><th>Дата/время</th><th>Тип действия</th><th>Объект</th><th>Старое значение</th><th>Новое значение</th></tr></thead><tbody>';
+  logs.forEach(entry => {
+    const date = new Date(entry.ts || Date.now()).toLocaleString();
+    html += '<tr>' +
+      '<td>' + escapeHtml(date) + '</td>' +
+      '<td>' + escapeHtml(entry.action || '') + '</td>' +
+      '<td>' + escapeHtml(entry.object || '') + (entry.field ? ' (' + escapeHtml(entry.field) + ')' : '') + '</td>' +
+      '<td>' + escapeHtml(entry.oldValue || '') + '</td>' +
+      '<td>' + escapeHtml(entry.newValue || '') + '</td>' +
+      '</tr>';
+  });
+  html += '</tbody></table>';
+  return html;
+}
+
+function buildExecutorHistory(card, op) {
+  const entries = (card.logs || [])
+    .filter(entry => entry.targetId === op.id && entry.field === 'executor')
+    .sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  if (!entries.length) {
+    return op.executor || '';
+  }
+  const chain = [];
+  entries.forEach((entry, idx) => {
+    if (idx === 0 && entry.oldValue) chain.push(entry.oldValue);
+    if (entry.newValue) chain.push(entry.newValue);
+  });
+  if (!chain.length && op.executor) chain.push(op.executor);
+  return chain.filter(Boolean).join(' → ');
+}
+
+function buildSummaryTable(card) {
+  const opsSorted = [...(card.operations || [])].sort((a, b) => (a.order || 0) - (b.order || 0));
+  if (!opsSorted.length) return '<p>Маршрут пока пуст.</p>';
+  let html = '<table><thead><tr>' +
+    '<th>Порядок</th><th>Участок</th><th>Код операции</th><th>Операция</th><th>Исполнитель</th><th>План (мин)</th><th>Статус</th><th>Текущее / факт. время</th><th>Комментарии</th>' +
+    '</tr></thead><tbody>';
+
+  opsSorted.forEach((op, idx) => {
+    const rowId = card.id + '::' + op.id;
+    const elapsed = getOperationElapsedSeconds(op);
+    let timeCell = '';
+    if (op.status === 'IN_PROGRESS' || op.status === 'PAUSED') {
+      timeCell = '<span class="wo-timer" data-row-id="' + rowId + '">' + formatSecondsToHMS(elapsed) + '</span>';
+    } else if (op.status === 'DONE') {
+      const seconds = typeof op.elapsedSeconds === 'number' && op.elapsedSeconds
+        ? op.elapsedSeconds
+        : (op.actualSeconds || 0);
+      timeCell = formatSecondsToHMS(seconds);
+    }
+
+    const executorHistory = buildExecutorHistory(card, op) || op.executor || '';
+    html += '<tr data-row-id="' + rowId + '">' +
+      '<td>' + (idx + 1) + '</td>' +
+      '<td>' + escapeHtml(op.centerName) + '</td>' +
+      '<td>' + escapeHtml(op.opCode || '') + '</td>' +
+      '<td>' + renderOpName(op) + '</td>' +
+      '<td>' + escapeHtml(executorHistory) + '</td>' +
+      '<td>' + (op.plannedMinutes || '') + '</td>' +
+      '<td>' + statusBadge(op.status) + '</td>' +
+      '<td>' + timeCell + '</td>' +
+      '<td>' + escapeHtml(op.comment || '') + '</td>' +
+      '</tr>';
+  });
+
+  html += '</tbody></table>';
+  return html;
+}
+
+function renderInitialSnapshot(card) {
+  const container = document.getElementById('log-initial-view');
+  if (!container || !card) return;
+  const snapshot = card.initialSnapshot || card;
+  const metaHtml = '<div class="log-initial-meta">' +
+    '<div><strong>Наименование:</strong> ' + escapeHtml(snapshot.name || '') + '</div>' +
+    '<div><strong>Заказ:</strong> ' + escapeHtml(snapshot.orderNo || '') + '</div>' +
+    '<div><strong>Описание:</strong> ' + escapeHtml(snapshot.desc || '') + '</div>' +
+    '</div>';
+  const opsHtml = buildSummaryTable(snapshot);
+  container.innerHTML = metaHtml + opsHtml;
+}
+
+function renderLogModal(cardId) {
+  const modal = document.getElementById('log-modal');
+  if (!modal) return;
+  const card = cards.find(c => c.id === cardId);
+  if (!card) return;
+  logContextCardId = card.id;
+  const barcodeCanvas = document.getElementById('log-barcode-canvas');
+  drawBarcodeEAN13(barcodeCanvas, card.barcode || '');
+  const barcodeNum = document.getElementById('log-barcode-number');
+  if (barcodeNum) barcodeNum.textContent = card.barcode || '';
+  const nameEl = document.getElementById('log-card-name');
+  if (nameEl) nameEl.textContent = card.name || '';
+  const orderEl = document.getElementById('log-card-order');
+  if (orderEl) orderEl.textContent = card.orderNo || '';
+  const statusEl = document.getElementById('log-card-status');
+  if (statusEl) statusEl.textContent = cardStatusText(card);
+  const createdEl = document.getElementById('log-card-created');
+  if (createdEl) createdEl.textContent = new Date(card.createdAt || Date.now()).toLocaleString();
+
+  renderInitialSnapshot(card);
+  const historyContainer = document.getElementById('log-history-table');
+  if (historyContainer) historyContainer.innerHTML = buildLogHistoryTable(card);
+  const summaryContainer = document.getElementById('log-summary-table');
+  if (summaryContainer) summaryContainer.innerHTML = buildSummaryTable(card);
+
+  modal.classList.remove('hidden');
+}
+
+function openLogModal(cardId) {
+  renderLogModal(cardId);
+}
+
+function closeLogModal() {
+  const modal = document.getElementById('log-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  logContextCardId = null;
+}
+
+function printSummaryTable() {
+  if (!logContextCardId) return;
+  const card = cards.find(c => c.id === logContextCardId);
+  if (!card) return;
+  const summaryHtml = buildSummaryTable(card);
+  const barcodeCanvas = document.getElementById('log-barcode-canvas');
+  const barcodeData = barcodeCanvas ? barcodeCanvas.toDataURL('image/png') : '';
+  const win = window.open('', '_blank');
+  if (!win) return;
+  const styles = `
+    @page { size: A4 landscape; margin: 20mm; }
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    table { border-collapse: collapse; width: 100%; font-size: 12px; }
+    th, td { border: 1px solid #d1d5db; padding: 6px 8px; text-align: left; vertical-align: top; }
+    thead { background: #f3f4f6; }
+    .barcode-print { display: flex; align-items: center; gap: 12px; margin: 8px 0; }
+    .meta-print { margin: 6px 0; font-size: 13px; }
+  `;
+  win.document.write('<html><head><title>Сводная таблица</title><style>' + styles + '</style></head><body>');
+  win.document.write('<h2>' + escapeHtml(card.name || '') + '</h2>');
+  win.document.write('<div class="meta-print"><strong>Заказ:</strong> ' + escapeHtml(card.orderNo || '') + '</div>');
+  if (barcodeData) {
+    win.document.write('<div class="barcode-print"><img src="' + barcodeData + '" style="max-height:80px;" /><strong>' + escapeHtml(card.barcode || '') + '</strong></div>');
+  }
+  win.document.write(summaryHtml);
+  win.document.write('</body></html>');
+  win.document.close();
+  win.focus();
+  win.print();
+}
+
+function setupLogModal() {
+  const modal = document.getElementById('log-modal');
+  const closeBtn = document.getElementById('log-close');
+  const printBtn = document.getElementById('log-print-summary');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => closeLogModal());
+  }
+  if (modal) {
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeLogModal();
+    });
+  }
+  if (printBtn) {
+    printBtn.addEventListener('click', () => printSummaryTable());
   }
 }
 
@@ -1330,6 +1640,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       ? ' • № карты: <span class="summary-barcode">' + escapeHtml(card.barcode) + ' <button type="button" class="btn-small btn-secondary wo-barcode-btn" data-card-id="' + card.id + '">Штрихкод</button></span>'
       : '';
     const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
+    const logButton = ' <button type="button" class="btn-small btn-secondary log-btn" data-log-card="' + card.id + '">Log</button>';
 
     html += '<details class="wo-card" data-card-id="' + card.id + '"' + (opened ? ' open' : '') + '>' +
       '<summary>' +
@@ -1338,7 +1649,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       '<strong>' + escapeHtml(card.name || card.id) + '</strong>' +
       ' <span class="summary-sub">' +
       (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') +
-      barcodeInline + filesButton +
+      barcodeInline + filesButton + logButton +
       '</span>' +
       '</div>' +
       '<div class="summary-actions">' +
@@ -1387,11 +1698,23 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
     });
   });
 
+  wrapper.querySelectorAll('.log-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = btn.getAttribute('data-log-card');
+      openLogModal(id);
+    });
+  });
+
   wrapper.querySelectorAll('.archive-move-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const id = btn.getAttribute('data-card-id');
       const card = cards.find(c => c.id === id);
       if (!card) return;
+      if (!card.archived) {
+        recordCardLog(card, { action: 'Архивирование', object: 'Карта', field: 'archived', oldValue: false, newValue: true });
+      }
       card.archived = true;
       saveData();
       renderEverything();
@@ -1408,7 +1731,11 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       if (!op) return;
       const value = (e.target.value || '').slice(0, 40);
       e.target.value = value;
+      const prev = op.comment || '';
       op.comment = value;
+      if (prev !== value) {
+        recordCardLog(card, { action: 'Комментарий', object: opLogLabel(op), field: 'comment', targetId: op.id, oldValue: prev, newValue: value });
+      }
       saveData();
       renderDashboard();
       autoResizeComment(e.target);
@@ -1428,6 +1755,10 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       if (detail && detail.open) {
         workorderOpenCards.add(cardId);
       }
+
+      const prevStatus = op.status;
+      const prevElapsed = op.elapsedSeconds || 0;
+      const prevCardStatus = card.status;
 
       if (action === 'start') {
         op.status = 'IN_PROGRESS';
@@ -1464,6 +1795,15 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       }
 
       recalcCardStatus(card);
+      if (prevStatus !== op.status) {
+        recordCardLog(card, { action: 'Статус операции', object: opLogLabel(op), field: 'status', targetId: op.id, oldValue: prevStatus, newValue: op.status });
+      }
+      if (prevElapsed !== op.elapsedSeconds && op.status === 'DONE') {
+        recordCardLog(card, { action: 'Факт. время', object: opLogLabel(op), field: 'elapsedSeconds', targetId: op.id, oldValue: Math.round(prevElapsed), newValue: Math.round(op.elapsedSeconds || 0) });
+      }
+      if (prevCardStatus !== card.status) {
+        recordCardLog(card, { action: 'Статус карты', object: 'Карта', field: 'status', oldValue: prevCardStatus, newValue: card.status });
+      }
       saveData();
       renderEverything();
     });
@@ -1511,6 +1851,7 @@ function renderArchiveTable() {
       ? ' • № карты: <span class="summary-barcode">' + escapeHtml(card.barcode) + ' <button type="button" class="btn-small btn-secondary wo-barcode-btn" data-card-id="' + card.id + '">Штрихкод</button></span>'
       : '';
     const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
+    const logButton = ' <button type="button" class="btn-small btn-secondary log-btn" data-log-card="' + card.id + '">Log</button>';
 
     html += '<details class="wo-card">' +
       '<summary>' +
@@ -1519,7 +1860,7 @@ function renderArchiveTable() {
       '<strong>' + escapeHtml(card.name || card.id) + '</strong>' +
       ' <span class="summary-sub">' +
       (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') +
-      barcodeInline + filesButton +
+      barcodeInline + filesButton + logButton +
       '</span>' +
       '</div>' +
       '<div class="summary-actions">' +
@@ -1550,6 +1891,15 @@ function renderArchiveTable() {
       e.stopPropagation();
       const id = btn.getAttribute('data-attach-card');
       openAttachmentsModal(id, 'live');
+    });
+  });
+
+  wrapper.querySelectorAll('.log-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = btn.getAttribute('data-log-card');
+      openLogModal(id);
     });
   });
 
@@ -1846,6 +2196,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupForms();
   setupBarcodeModal();
   setupAttachmentControls();
+  setupLogModal();
   renderEverything();
   setInterval(tickTimers, 1000);
 });
