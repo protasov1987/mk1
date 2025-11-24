@@ -1,0 +1,12 @@
+{
+  "name": "mk1",
+  "version": "1.0.0",
+  "description": "Маршрут технологических карт — локальное веб-приложение",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
