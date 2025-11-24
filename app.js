@@ -1542,6 +1542,13 @@ function renderArchiveTable() {
     });
   });
 
+  wrapper.querySelectorAll('button[data-attach-card]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-attach-card');
+      openAttachmentsModal(id, 'live');
+    });
+  });
+
   wrapper.querySelectorAll('.repeat-card-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const id = btn.getAttribute('data-card-id');
