@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Маршрут технологических карт ТСЗП</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>Маршрут технологических карт ТСЗП</h1>
+    <nav>
+      <button class="nav-btn active" data-target="dashboard">Дашборд</button>
+      <button class="nav-btn" data-target="cards">Тех. карты</button>
+      <button class="nav-btn" data-target="directory">Операции и участки</button>
+      <button class="nav-btn" data-target="workorders">Маршрутные квитанции</button>
+      <button class="nav-btn" data-target="archive">Архив</button>
+    </nav>
+  </header>
+
+  <div id="server-status" class="status-banner status-info hidden" role="status" aria-live="polite"></div>
+
+  <main>
+    <!-- Дашборд -->
+    <section id="dashboard" class="active">
+      <div class="card">
+        <h2>Состояние производства</h2>
+        <div class="stats" id="dashboard-stats"></div>
+      </div>
+      <div class="card">
+        <h3>Последние технологические карты</h3>
+        <div id="dashboard-cards"></div>
+      </div>
+    </section>
+
+    <!-- Тех. карты -->
+    <section id="cards">
+      <div class="card">
+        <h2>Технологические карты</h2>
+        <button class="btn-primary" id="btn-new-card">Создать карту</button>
+        <div id="cards-table-wrapper"></div>
+      </div>
+    </section>
+
+    <!-- Справочники -->
+    <section id="directory">
+      <div class="card">
+        <h2>Справочник участков</h2>
+        <form id="center-form" class="flex" style="flex-wrap:wrap;">
+          <div class="flex-col" style="flex:1 1 200px;">
+            <label for="center-name">Название участка</label>
+            <input id="center-name" required />
+          </div>
+          <div class="flex-col" style="flex:2 1 260px;">
+            <label for="center-desc">Описание</label>
+            <input id="center-desc" />
+          </div>
+          <div class="flex-col" style="flex:0 0 auto; align-self:flex-end;">
+            <button type="submit" class="btn-primary">Добавить участок</button>
+          </div>
+        </form>
+        <div id="centers-table-wrapper"></div>
+      </div>
+
+      <div class="card">
+        <h2>Справочник операций</h2>
+        <form id="op-form" class="flex" style="flex-wrap:wrap;">
+          <div class="flex-col" style="flex:1 1 200px;">
+            <label for="op-name">Название операции</label>
+            <input id="op-name" required />
+          </div>
+          <div class="flex-col" style="flex:2 1 260px;">
+            <label for="op-desc">Описание</label>
+            <input id="op-desc" />
+          </div>
+          <div class="flex-col" style="flex:0 1 140px;">
+            <label for="op-time">Рекомендуемое время (мин)</label>
+            <input id="op-time" type="number" min="1" value="30" />
+          </div>
+          <div class="flex-col" style="flex:0 0 auto; align-self:flex-end;">
+            <button type="submit" class="btn-primary">Добавить операцию</button>
+          </div>
+        </form>
+        <div id="ops-table-wrapper"></div>
+      </div>
+    </section>
+
+    <!-- Маршрутные квитанции -->
+    <section id="workorders">
+      <div class="card">
+        <h2>Маршрутные квитанции</h2>
+
+        <!-- Поиск -->
+        <div class="flex" style="margin-bottom:8px; align-items:flex-end;">
+          <div class="flex-col" style="flex:1 1 260px;">
+            <label for="workorder-search">Поиск техкарты (№ карты, название, заказ)</label>
+            <input id="workorder-search" placeholder="Введите № EAN-13, название или номер заказа" />
+          </div>
+          <div class="flex-col" style="flex:0 1 200px;">
+            <label for="workorder-status">Статус карты</label>
+            <select id="workorder-status">
+              <option value="ALL">Все</option>
+              <option value="NOT_STARTED">Не запущена</option>
+              <option value="IN_PROGRESS">Выполняется</option>
+              <option value="PAUSED">Пауза</option>
+              <option value="MIXED">Смешанно</option>
+              <option value="DONE">Выполнено</option>
+            </select>
+          </div>
+          <div class="flex-col" style="flex:0 0 auto;">
+            <button class="btn-secondary" id="workorder-search-clear">Сбросить</button>
+          </div>
+        </div>
+
+        <p style="font-size:12px; color:#6b7280; margin-top:0;">
+          Исполнитель выбирает нужную операцию и нажимает <strong>«Начать»</strong>, при необходимости <strong>«Пауза»</strong> /
+          <strong>«Продолжить»</strong>, после завершения — <strong>«Завершить»</strong>.
+        </p>
+        <div id="workorders-table-wrapper"></div>
+      </div>
+    </section>
+
+    <!-- Архив -->
+    <section id="archive">
+      <div class="card">
+        <h2>Архив маршрутных карт</h2>
+        <div class="flex" style="margin-bottom:8px; align-items:flex-end;">
+          <div class="flex-col" style="flex:1 1 260px;">
+            <label for="archive-search">Поиск в архиве (№ карты, название, заказ)</label>
+            <input id="archive-search" placeholder="Введите № EAN-13, название или номер заказа" />
+          </div>
+          <div class="flex-col" style="flex:0 1 200px;">
+            <label for="archive-status">Статус карты</label>
+            <select id="archive-status">
+              <option value="ALL">Все</option>
+              <option value="NOT_STARTED">Не запущена</option>
+              <option value="IN_PROGRESS">Выполняется</option>
+              <option value="PAUSED">Пауза</option>
+              <option value="MIXED">Смешанно</option>
+              <option value="DONE">Выполнено</option>
+            </select>
+          </div>
+          <div class="flex-col" style="flex:0 0 auto;">
+            <button class="btn-secondary" id="archive-search-clear">Сбросить</button>
+          </div>
+        </div>
+        <p style="font-size:12px; color:#6b7280; margin-top:0;">
+          Архивные карты доступны только для просмотра. При необходимости нажмите «Повторить», чтобы создать копию и перезапустить процесс.
+        </p>
+        <div id="archive-table-wrapper"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="card-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="card-modal-title">
+    <div class="modal-content card-modal-content">
+      <div class="modal-header">
+        <h2 id="card-modal-title">Карта</h2>
+      </div>
+      <div class="modal-body">
+        <form id="card-form" class="flex-col">
+          <input type="hidden" id="card-id" />
+          <div class="flex">
+            <div class="flex-col" style="flex:1 1 200px;">
+              <label for="card-name">Наименование карты / изделия</label>
+              <input id="card-name" required />
+            </div>
+            <div class="flex-col" style="flex:1 1 160px;">
+              <label for="card-order">Номер / код заказа</label>
+              <input id="card-order" />
+            </div>
+          </div>
+          <div class="flex-col">
+            <label for="card-desc">Описание</label>
+            <textarea id="card-desc"></textarea>
+          </div>
+          <div class="flex" style="align-items:center; justify-content:space-between;">
+            <div>
+              <strong>Статус:</strong> <span id="card-status-text"></span>
+            </div>
+          </div>
+        </form>
+
+        <div class="card inset-card" id="route-editor">
+          <h3>Маршрут выполнения операций</h3>
+          <div id="route-table-wrapper"></div>
+          <h3>Добавить операцию в маршрут</h3>
+          <form id="route-form" class="flex" style="flex-wrap:wrap;">
+            <div class="flex-col" style="flex:2 1 180px;">
+              <label for="route-op">Операция</label>
+              <select id="route-op" required></select>
+            </div>
+            <div class="flex-col" style="flex:2 1 180px;">
+              <label for="route-center">Участок</label>
+              <select id="route-center" required></select>
+            </div>
+            <div class="flex-col" style="flex:1 1 120px;">
+              <label for="route-executor">Исполнитель</label>
+              <input id="route-executor" placeholder="ФИО" />
+            </div>
+            <div class="flex-col" style="flex:1 1 120px;">
+              <label for="route-planned">Плановое время (мин)</label>
+              <input id="route-planned" type="number" min="1" value="30" required />
+            </div>
+            <div class="flex-col" style="flex:0 0 auto; align-self:flex-end;">
+              <button type="submit" class="btn-primary">Добавить</button>
+            </div>
+          </form>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="card-save-btn" class="btn-primary">Сохранить карту</button>
+        <button type="button" id="card-cancel-btn" class="btn-secondary">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Локальное веб-приложение. Данные сохраняются на сервере и доступны из нескольких браузеров.
+  </footer>
+
+  <!-- Модальное окно для штрихкода -->
+  <div id="barcode-modal" class="barcode-modal">
+    <div class="barcode-modal-content">
+      <h3>Штрихкод технологической карты</h3>
+      <p style="font-size:12px; color:#6b7280; margin-top:0;">Формат EAN-13</p>
+      <canvas id="barcode-canvas"></canvas>
+      <div style="margin-top:8px; font-size:14px;">
+        Код: <span id="barcode-modal-code"></span>
+      </div>
+      <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+        <button id="btn-print-barcode" class="btn-primary">Печать</button>
+        <button id="btn-close-barcode" class="btn-secondary">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
