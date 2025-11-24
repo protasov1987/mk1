@@ -191,6 +191,9 @@
             <div>
               <strong>Статус:</strong> <span id="card-status-text"></span>
             </div>
+            <div class="flex" style="gap:8px; align-items:center;">
+              <button type="button" id="card-attachments-btn" class="btn-secondary">📎 Файлы (0)</button>
+            </div>
           </div>
         </form>
 
@@ -235,6 +238,25 @@
   <footer>
     Локальное веб-приложение. Данные сохраняются на сервере и доступны из нескольких браузеров.
   </footer>
+
+  <div id="attachments-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="attachments-title">
+    <div class="modal-content attachments-content">
+      <div class="modal-header">
+        <h3 id="attachments-title">Файлы карты</h3>
+      </div>
+      <div class="modal-body">
+        <div class="attachments-actions">
+          <button type="button" id="attachments-add-btn" class="btn-primary">Добавить файл</button>
+          <input type="file" id="attachments-input" class="hidden-input" accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png,application/zip,application/x-rar-compressed,application/x-7z-compressed" multiple />
+          <span id="attachments-upload-hint" class="upload-hint"></span>
+        </div>
+        <div id="attachments-list"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="attachments-close" class="btn-secondary">Закрыть</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Модальное окно для штрихкода -->
   <div id="barcode-modal" class="barcode-modal">

@@ -8,7 +8,9 @@ const PORT = process.env.PORT || 8000;
 const HOST = process.env.HOST || 'localhost';
 const DATA_DIR = path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'database.json');
-const MAX_BODY_SIZE = 1024 * 1024; // 1 MB
+const MAX_BODY_SIZE = 20 * 1024 * 1024; // 20 MB to allow attachments
+const FILE_SIZE_LIMIT = 15 * 1024 * 1024; // 15 MB per attachment
+const ALLOWED_EXTENSIONS = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.zip', '.rar', '.7z'];
 
 function genId(prefix) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`;
@@ -106,6 +108,7 @@ function buildDefaultData() {
       desc: 'Демонстрационная карта для примера.',
       status: 'NOT_STARTED',
       archived: false,
+      attachments: [],
       operations: [
         createRouteOpFromRefs(ops[0], centers[0], 'Иванов И.И.', 40, 1),
         createRouteOpFromRefs(ops[1], centers[1], 'Петров П.П.', 60, 2),
@@ -212,6 +215,16 @@ function normalizeCard(card) {
     comment: typeof op.comment === 'string' ? op.comment : ''
   }));
   safeCard.archived = Boolean(safeCard.archived);
+  safeCard.attachments = Array.isArray(safeCard.attachments)
+    ? safeCard.attachments.map(file => ({
+      id: file.id || genId('file'),
+      name: file.name || 'file',
+      type: file.type || 'application/octet-stream',
+      size: Number(file.size) || 0,
+      content: typeof file.content === 'string' ? file.content : '',
+      createdAt: file.createdAt || Date.now()
+    }))
+    : [];
   recalcCardStatus(safeCard);
   return safeCard;
 }
@@ -290,8 +303,111 @@ async function handleApi(req, res) {
   return false;
 }
 
+function findAttachment(data, attachmentId) {
+  for (const card of data.cards || []) {
+    const found = (card.attachments || []).find(f => f.id === attachmentId);
+    if (found) {
+      return { card, attachment: found };
+    }
+  }
+  return null;
+}
+
+async function handleFileRoutes(req, res) {
+  const parsed = url.parse(req.url, true);
+  if (req.method === 'GET' && parsed.pathname.startsWith('/files/')) {
+    const attachmentId = parsed.pathname.replace('/files/', '');
+    const data = await database.getData();
+    const match = findAttachment(data, attachmentId);
+    if (!match) {
+      res.writeHead(404);
+      res.end('Not found');
+      return true;
+    }
+    const { attachment } = match;
+    if (!attachment.content) {
+      res.writeHead(404);
+      res.end('File missing');
+      return true;
+    }
+    const base64 = attachment.content.split(',').pop();
+    const buffer = Buffer.from(base64, 'base64');
+    res.writeHead(200, {
+      'Content-Type': attachment.type || 'application/octet-stream',
+      'Content-Length': buffer.length,
+      'Content-Disposition': `attachment; filename="${attachment.name || 'file'}"`
+    });
+    res.end(buffer);
+    return true;
+  }
+
+  if (req.method === 'GET' && parsed.pathname.startsWith('/api/cards/') && parsed.pathname.endsWith('/files')) {
+    const cardId = parsed.pathname.split('/')[3];
+    const data = await database.getData();
+    const card = (data.cards || []).find(c => c.id === cardId);
+    if (!card) {
+      sendJson(res, 404, { error: 'Card not found' });
+      return true;
+    }
+    sendJson(res, 200, { files: card.attachments || [] });
+    return true;
+  }
+
+  if (req.method === 'POST' && parsed.pathname.startsWith('/api/cards/') && parsed.pathname.endsWith('/files')) {
+    const cardId = parsed.pathname.split('/')[3];
+    try {
+      const raw = await parseBody(req);
+      const payload = JSON.parse(raw || '{}');
+      const { name, type, content, size } = payload || {};
+      if (!name || !content) {
+        sendJson(res, 400, { error: 'Invalid payload' });
+        return true;
+      }
+      const ext = path.extname(name || '').toLowerCase();
+      if (ALLOWED_EXTENSIONS.length && ext && !ALLOWED_EXTENSIONS.includes(ext)) {
+        sendJson(res, 400, { error: 'Недопустимый тип файла' });
+        return true;
+      }
+      const base64 = content.split(',').pop();
+      const buffer = Buffer.from(base64, 'base64');
+      if (buffer.length > FILE_SIZE_LIMIT) {
+        sendJson(res, 413, { error: 'Файл слишком большой' });
+        return true;
+      }
+
+      const saved = await database.update(data => {
+        const draft = normalizeData(data);
+        const card = (draft.cards || []).find(c => c.id === cardId);
+        if (!card) {
+          throw new Error('Card not found');
+        }
+        const file = {
+          id: genId('file'),
+          name,
+          type: type || 'application/octet-stream',
+          size: size || buffer.length,
+          content,
+          createdAt: Date.now()
+        };
+        card.attachments = Array.isArray(card.attachments) ? card.attachments : [];
+        card.attachments.push(file);
+        return draft;
+      });
+      const card = (saved.cards || []).find(c => c.id === cardId);
+      sendJson(res, 200, { status: 'ok', files: card ? card.attachments || [] : [] });
+    } catch (err) {
+      const status = err.message === 'Payload too large' ? 413 : 400;
+      sendJson(res, status, { error: err.message || 'Upload error' });
+    }
+    return true;
+  }
+
+  return false;
+}
+
 async function requestHandler(req, res) {
   if (await handleApi(req, res)) return;
+  if (await handleFileRoutes(req, res)) return;
   serveStatic(req, res);
 }
 

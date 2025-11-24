@@ -15,6 +15,9 @@ let activeCardOriginalId = null;
 let activeCardIsNew = false;
 let routeOpCodeFilter = '';
 let cardsSearchTerm = '';
+let attachmentContext = null;
+const ATTACH_ACCEPT = '.pdf,.doc,.docx,.jpg,.jpeg,.png,.zip,.rar,.7z';
+const ATTACH_MAX_SIZE = 15 * 1024 * 1024; // 15 MB
 
 function setConnectionStatus(message, variant = 'info') {
   const banner = document.getElementById('server-status');
@@ -87,6 +90,44 @@ function autoResizeComment(el) {
 
 function cloneCard(card) {
   return JSON.parse(JSON.stringify(card));
+}
+
+function ensureAttachments(card) {
+  if (!card) return;
+  if (!Array.isArray(card.attachments)) card.attachments = [];
+  card.attachments = card.attachments.map(file => ({
+    id: file.id || genId('file'),
+    name: file.name || 'file',
+    type: file.type || 'application/octet-stream',
+    size: typeof file.size === 'number' ? file.size : 0,
+    content: typeof file.content === 'string' ? file.content : '',
+    createdAt: file.createdAt || Date.now()
+  }));
+}
+
+function dataUrlToBlob(dataUrl, fallbackType = 'application/octet-stream') {
+  const parts = (dataUrl || '').split(',');
+  if (parts.length < 2) return new Blob([], { type: fallbackType });
+  const match = parts[0].match(/data:(.*);base64/);
+  const mime = match ? match[1] : fallbackType;
+  const binary = atob(parts[1]);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: mime });
+}
+
+function formatBytes(size) {
+  if (!size) return '0 Б';
+  const units = ['Б', 'КБ', 'МБ', 'ГБ'];
+  let idx = 0;
+  let s = size;
+  while (s >= 1024 && idx < units.length - 1) {
+    s /= 1024;
+    idx++;
+  }
+  return s.toFixed(Math.min(1, idx)).replace(/\.0$/, '') + ' ' + units[idx];
 }
 
 // === EAN-13: генерация и прорисовка ===
@@ -504,6 +545,7 @@ function ensureDefaults() {
         desc: 'Демонстрационная карта для примера.',
         status: 'NOT_STARTED',
         archived: false,
+        attachments: [],
         operations: [
           createRouteOpFromRefs(op1, wc1, 'Иванов И.И.', 40, 1),
           createRouteOpFromRefs(op2, wc2, 'Петров П.П.', 60, 2),
@@ -541,6 +583,7 @@ async function loadData() {
       c.barcode = generateUniqueEAN13();
     }
     c.archived = Boolean(c.archived);
+    ensureAttachments(c);
     c.operations = c.operations || [];
     c.operations.forEach(op => {
       if (typeof op.elapsedSeconds !== 'number') {
@@ -680,15 +723,17 @@ function renderCardsTable() {
   }
 
   let html = '<table><thead><tr>' +
-    '<th>№ карты (EAN-13)</th><th>Наименование</th><th>Заказ</th><th>Статус</th><th>Операций</th><th>Действия</th>' +
+    '<th>№ карты (EAN-13)</th><th>Наименование</th><th>Заказ</th><th>Статус</th><th>Операций</th><th>Файлы</th><th>Действия</th>' +
     '</tr></thead><tbody>';
   filteredCards.forEach(card => {
+    const filesCount = (card.attachments || []).length;
     html += '<tr>' +
       '<td><button class="btn-link barcode-link" data-id="' + card.id + '">' + escapeHtml(card.barcode || '') + '</button></td>' +
       '<td>' + escapeHtml(card.name) + '</td>' +
       '<td>' + escapeHtml(card.orderNo || '') + '</td>' +
       '<td>' + cardStatusText(card) + '</td>' +
       '<td>' + (card.operations ? card.operations.length : 0) + '</td>' +
+      '<td><button class="btn-small clip-btn" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button></td>' +
       '<td><div class="table-actions">' +
       '<button class="btn-small" data-action="edit-card" data-id="' + card.id + '">Открыть</button>' +
       '<button class="btn-small" data-action="copy-card" data-id="' + card.id + '">Копировать</button>' +
@@ -728,6 +773,12 @@ function renderCardsTable() {
       openBarcodeModal(card);
     });
   });
+
+  wrapper.querySelectorAll('button[data-attach-card]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      openAttachmentsModal(btn.getAttribute('data-attach-card'), 'live');
+    });
+  });
 }
 
 function duplicateCard(cardId) {
@@ -739,6 +790,11 @@ function duplicateCard(cardId) {
   copy.name = (card.name || '') + ' (копия)';
   copy.status = 'NOT_STARTED';
   copy.archived = false;
+  copy.attachments = (copy.attachments || []).map(file => ({
+    ...file,
+    id: genId('file'),
+    createdAt: Date.now()
+  }));
   copy.operations = (copy.operations || []).map((op, idx) => ({
     ...op,
     id: genId('rop'),
@@ -765,6 +821,7 @@ function createEmptyCardDraft() {
     desc: '',
     status: 'NOT_STARTED',
     archived: false,
+    attachments: [],
     operations: []
   };
 }
@@ -788,6 +845,10 @@ function openCardModal(cardId) {
   document.getElementById('card-order').value = activeCardDraft.orderNo || '';
   document.getElementById('card-desc').value = activeCardDraft.desc || '';
   document.getElementById('card-status-text').textContent = cardStatusText(activeCardDraft);
+  const attachBtn = document.getElementById('card-attachments-btn');
+  if (attachBtn) {
+    attachBtn.innerHTML = '📎 Файлы (' + (activeCardDraft.attachments ? activeCardDraft.attachments.length : 0) + ')';
+  }
   routeOpCodeFilter = '';
   const routeFilterInput = document.getElementById('route-op-code-filter');
   if (routeFilterInput) {
@@ -829,6 +890,148 @@ function saveCardDraft() {
   saveData();
   renderEverything();
   closeCardModal();
+}
+
+function getAttachmentTargetCard() {
+  if (!attachmentContext) return null;
+  if (attachmentContext.source === 'draft') {
+    return activeCardDraft;
+  }
+  return cards.find(c => c.id === attachmentContext.cardId);
+}
+
+function renderAttachmentsModal() {
+  const modal = document.getElementById('attachments-modal');
+  if (!modal || !attachmentContext) return;
+  const card = getAttachmentTargetCard();
+  const title = document.getElementById('attachments-title');
+  const list = document.getElementById('attachments-list');
+  const uploadHint = document.getElementById('attachments-upload-hint');
+  if (!card || !list || !title || !uploadHint) return;
+  ensureAttachments(card);
+  title.textContent = card.name || card.barcode || 'Файлы карты';
+  const files = card.attachments || [];
+  if (!files.length) {
+    list.innerHTML = '<p>Файлы ещё не добавлены.</p>';
+  } else {
+    let html = '<table class="attachments-table"><thead><tr><th>Имя файла</th><th>Размер</th><th>Дата</th><th>Действия</th></tr></thead><tbody>';
+    files.forEach(file => {
+      const date = new Date(file.createdAt || Date.now()).toLocaleString();
+      const downloadAttr = attachmentContext.source === 'live'
+        ? 'href="/files/' + file.id + '" target="_blank" rel="noopener"'
+        : '';
+      html += '<tr>' +
+        '<td>' + escapeHtml(file.name || 'файл') + '</td>' +
+        '<td>' + escapeHtml(formatBytes(file.size)) + '</td>' +
+        '<td>' + escapeHtml(date) + '</td>' +
+        '<td><div class="table-actions">' +
+        (attachmentContext.source === 'live'
+          ? '<a class="btn-small" ' + downloadAttr + '>Скачать</a>'
+          : '<button class="btn-small" data-download-id="' + file.id + '">Скачать</button>') +
+        '</div></td>' +
+        '</tr>';
+    });
+    html += '</tbody></table>';
+    list.innerHTML = html;
+  }
+  uploadHint.textContent = 'Допустимые форматы: pdf, doc, jpg, архив. Максимум ' + formatBytes(ATTACH_MAX_SIZE) + '.';
+
+  if (attachmentContext.source !== 'live') {
+    list.querySelectorAll('button[data-download-id]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-download-id');
+        const cardRef = getAttachmentTargetCard();
+        if (!cardRef) return;
+        const file = (cardRef.attachments || []).find(f => f.id === id);
+        if (!file || !file.content) return;
+        const blob = dataUrlToBlob(file.content, file.type);
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = file.name || 'file';
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(link.href), 5000);
+      });
+    });
+  }
+}
+
+async function addAttachmentsFromFiles(fileList) {
+  const card = getAttachmentTargetCard();
+  if (!card || !fileList || !fileList.length) return;
+  ensureAttachments(card);
+  const filesArray = Array.from(fileList);
+  const allowed = ATTACH_ACCEPT.split(',').map(v => v.trim().toLowerCase()).filter(Boolean);
+  const newFiles = [];
+
+  for (const file of filesArray) {
+    const ext = ('.' + (file.name.split('.').pop() || '')).toLowerCase();
+    if (allowed.length && !allowed.includes(ext)) {
+      alert('Тип файла не поддерживается: ' + file.name);
+      continue;
+    }
+    if (file.size > ATTACH_MAX_SIZE) {
+      alert('Файл ' + file.name + ' превышает лимит ' + formatBytes(ATTACH_MAX_SIZE));
+      continue;
+    }
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    newFiles.push({
+      id: genId('file'),
+      name: file.name,
+      type: file.type || 'application/octet-stream',
+      size: file.size,
+      content: dataUrl,
+      createdAt: Date.now()
+    });
+  }
+
+  if (newFiles.length) {
+    card.attachments.push(...newFiles);
+    if (attachmentContext.source === 'live') {
+      await saveData();
+      renderEverything();
+    }
+    renderAttachmentsModal();
+    updateAttachmentCounters(card.id);
+  }
+}
+
+function openAttachmentsModal(cardId, source = 'live') {
+  const modal = document.getElementById('attachments-modal');
+  if (!modal) return;
+  const card = source === 'draft' ? activeCardDraft : cards.find(c => c.id === cardId);
+  if (!card) return;
+  attachmentContext = { cardId: card.id, source };
+  renderAttachmentsModal();
+  modal.classList.remove('hidden');
+}
+
+function closeAttachmentsModal() {
+  const modal = document.getElementById('attachments-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  const input = document.getElementById('attachments-input');
+  if (input) input.value = '';
+  attachmentContext = null;
+}
+
+function updateAttachmentCounters(cardId) {
+  const count = (() => {
+    if (activeCardDraft && activeCardDraft.id === cardId) {
+      return (activeCardDraft.attachments || []).length;
+    }
+    const card = cards.find(c => c.id === cardId);
+    return card ? (card.attachments || []).length : 0;
+  })();
+
+  const cardBtn = document.getElementById('card-attachments-btn');
+  if (cardBtn && activeCardDraft && activeCardDraft.id === cardId) {
+    cardBtn.innerHTML = '📎 Файлы (' + count + ')';
+  }
 }
 
 // === МАРШРУТ КАРТЫ (ЧЕРЕЗ МОДАЛЬНОЕ ОКНО) ===
@@ -1122,9 +1325,11 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
     const opened = !collapseAll && workorderOpenCards.has(card.id);
     const stateBadge = renderCardStateBadge(card);
     const canArchive = card.status === 'DONE';
+    const filesCount = (card.attachments || []).length;
     const barcodeInline = card.barcode
       ? ' • № карты: <span class="summary-barcode">' + escapeHtml(card.barcode) + ' <button type="button" class="btn-small btn-secondary wo-barcode-btn" data-card-id="' + card.id + '">Штрихкод</button></span>'
       : '';
+    const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
 
     html += '<details class="wo-card" data-card-id="' + card.id + '"' + (opened ? ' open' : '') + '>' +
       '<summary>' +
@@ -1133,7 +1338,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       '<strong>' + escapeHtml(card.name || card.id) + '</strong>' +
       ' <span class="summary-sub">' +
       (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') +
-      barcodeInline +
+      barcodeInline + filesButton +
       '</span>' +
       '</div>' +
       '<div class="summary-actions">' +
@@ -1170,6 +1375,13 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       const card = cards.find(c => c.id === id);
       if (!card) return;
       openBarcodeModal(card);
+    });
+  });
+
+  wrapper.querySelectorAll('button[data-attach-card]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-attach-card');
+      openAttachmentsModal(id, 'live');
     });
   });
 
@@ -1292,9 +1504,11 @@ function renderArchiveTable() {
   let html = '';
   filteredBySearch.forEach(card => {
     const stateBadge = renderCardStateBadge(card);
+    const filesCount = (card.attachments || []).length;
     const barcodeInline = card.barcode
       ? ' • № карты: <span class="summary-barcode">' + escapeHtml(card.barcode) + ' <button type="button" class="btn-small btn-secondary wo-barcode-btn" data-card-id="' + card.id + '">Штрихкод</button></span>'
       : '';
+    const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
 
     html += '<details class="wo-card">' +
       '<summary>' +
@@ -1303,7 +1517,7 @@ function renderArchiveTable() {
       '<strong>' + escapeHtml(card.name || card.id) + '</strong>' +
       ' <span class="summary-sub">' +
       (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') +
-      barcodeInline +
+      barcodeInline + filesButton +
       '</span>' +
       '</div>' +
       '<div class="summary-actions">' +
@@ -1350,6 +1564,11 @@ function renderArchiveTable() {
         name: (card.name || '') + ' (копия)',
         status: 'NOT_STARTED',
         archived: false,
+        attachments: (card.attachments || []).map(file => ({
+          ...file,
+          id: genId('file'),
+          createdAt: Date.now()
+        })),
         operations: cloneOps
       };
       recalcCardStatus(newCard);
@@ -1579,12 +1798,43 @@ function renderEverything() {
   renderArchiveTable();
 }
 
+function setupAttachmentControls() {
+  const modal = document.getElementById('attachments-modal');
+  const closeBtn = document.getElementById('attachments-close');
+  const addBtn = document.getElementById('attachments-add-btn');
+  const input = document.getElementById('attachments-input');
+  const cardBtn = document.getElementById('card-attachments-btn');
+
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => closeAttachmentsModal());
+  }
+  if (modal) {
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeAttachmentsModal();
+    });
+  }
+  if (addBtn && input) {
+    addBtn.addEventListener('click', () => input.click());
+    input.addEventListener('change', (e) => {
+      addAttachmentsFromFiles(e.target.files);
+      input.value = '';
+    });
+  }
+  if (cardBtn) {
+    cardBtn.addEventListener('click', () => {
+      if (!activeCardDraft) return;
+      openAttachmentsModal(activeCardDraft.id, 'draft');
+    });
+  }
+}
+
 // === ИНИЦИАЛИЗАЦИЯ ===
 document.addEventListener('DOMContentLoaded', async () => {
   await loadData();
   setupNavigation();
   setupForms();
   setupBarcodeModal();
+  setupAttachmentControls();
   renderEverything();
   setInterval(tickTimers, 1000);
 });
