@@ -15,7 +15,6 @@
       <nav>
         <button class="nav-btn active" data-target="dashboard">Дашборд</button>
         <button class="nav-btn" data-target="cards">Тех. карты</button>
-        <button class="nav-btn" data-target="directory">Операции и участки</button>
         <button class="nav-btn" data-target="workorders">Маршрутные квитанции</button>
         <button class="nav-btn" data-target="archive">Архив</button>
       </nav>
@@ -49,55 +48,60 @@
             <button class="btn-secondary" id="cards-search-clear">Сбросить</button>
           </div>
         </div>
-        <button class="btn-primary" id="btn-new-card">Создать карту</button>
+        <div class="cards-toolbar">
+          <div class="button-group">
+            <button class="btn-primary" id="btn-new-card">Создать карту</button>
+            <button class="btn-secondary" id="btn-toggle-directory">Операции и участки</button>
+          </div>
+        </div>
         <div id="cards-table-wrapper"></div>
       </div>
-    </section>
+      <div id="directory-inline" class="card inset-card hidden">
+        <div class="directory-grid">
+          <div class="directory-panel">
+            <h3>Справочник участков</h3>
+            <form id="center-form" class="flex" style="flex-wrap:wrap;">
+              <div class="flex-col" style="flex:1 1 200px;">
+                <label for="center-name">Название участка</label>
+                <input id="center-name" required />
+              </div>
+              <div class="flex-col" style="flex:2 1 260px;">
+                <label for="center-desc">Описание</label>
+                <input id="center-desc" />
+              </div>
+              <div class="flex-col" style="flex:0 0 auto; align-self:flex-end;">
+                <button type="submit" class="btn-primary">Добавить участок</button>
+              </div>
+            </form>
+            <div id="centers-table-wrapper"></div>
+          </div>
 
-    <!-- Справочники -->
-    <section id="directory">
-      <div class="card">
-        <h2>Справочник участков</h2>
-        <form id="center-form" class="flex" style="flex-wrap:wrap;">
-          <div class="flex-col" style="flex:1 1 200px;">
-            <label for="center-name">Название участка</label>
-            <input id="center-name" required />
+          <div class="directory-panel">
+            <h3>Справочник операций</h3>
+            <form id="op-form" class="flex" style="flex-wrap:wrap;">
+              <div class="flex-col" style="flex:0 1 160px;">
+                <label for="op-code">Код операции</label>
+                <input id="op-code" placeholder="Напр. OP-1234" />
+              </div>
+              <div class="flex-col" style="flex:1 1 200px;">
+                <label for="op-name">Название операции</label>
+                <input id="op-name" required />
+              </div>
+              <div class="flex-col" style="flex:2 1 260px;">
+                <label for="op-desc">Описание</label>
+                <input id="op-desc" />
+              </div>
+              <div class="flex-col" style="flex:0 1 140px;">
+                <label for="op-time">Рекомендуемое время (мин)</label>
+                <input id="op-time" type="number" min="1" value="30" />
+              </div>
+              <div class="flex-col" style="flex:0 0 auto; align-self:flex-end;">
+                <button type="submit" class="btn-primary">Добавить операцию</button>
+              </div>
+            </form>
+            <div id="ops-table-wrapper"></div>
           </div>
-          <div class="flex-col" style="flex:2 1 260px;">
-            <label for="center-desc">Описание</label>
-            <input id="center-desc" />
-          </div>
-          <div class="flex-col" style="flex:0 0 auto; align-self:flex-end;">
-            <button type="submit" class="btn-primary">Добавить участок</button>
-          </div>
-        </form>
-        <div id="centers-table-wrapper"></div>
-      </div>
-
-      <div class="card">
-        <h2>Справочник операций</h2>
-        <form id="op-form" class="flex" style="flex-wrap:wrap;">
-          <div class="flex-col" style="flex:0 1 160px;">
-            <label for="op-code">Код операции</label>
-            <input id="op-code" placeholder="Напр. OP-1234" />
-          </div>
-          <div class="flex-col" style="flex:1 1 200px;">
-            <label for="op-name">Название операции</label>
-            <input id="op-name" required />
-          </div>
-          <div class="flex-col" style="flex:2 1 260px;">
-            <label for="op-desc">Описание</label>
-            <input id="op-desc" />
-          </div>
-          <div class="flex-col" style="flex:0 1 140px;">
-            <label for="op-time">Рекомендуемое время (мин)</label>
-            <input id="op-time" type="number" min="1" value="30" />
-          </div>
-          <div class="flex-col" style="flex:0 0 auto; align-self:flex-end;">
-            <button type="submit" class="btn-primary">Добавить операцию</button>
-          </div>
-        </form>
-        <div id="ops-table-wrapper"></div>
+        </div>
       </div>
     </section>
 
@@ -181,9 +185,23 @@
               <label for="card-name">Наименование карты / изделия</label>
               <input id="card-name" required />
             </div>
+            <div class="flex-col" style="flex:0 1 140px;">
+              <label for="card-qty">Количество изделий, шт</label>
+              <input id="card-qty" type="number" min="0" step="1" />
+            </div>
             <div class="flex-col" style="flex:1 1 160px;">
               <label for="card-order">Номер / код заказа</label>
               <input id="card-order" />
+            </div>
+          </div>
+          <div class="flex" style="gap:12px; flex-wrap:wrap;">
+            <div class="flex-col" style="flex:1 1 200px;">
+              <label for="card-drawing">Чертёж / обозначение детали</label>
+              <input id="card-drawing" />
+            </div>
+            <div class="flex-col" style="flex:1 1 200px;">
+              <label for="card-material">Материал</label>
+              <input id="card-material" />
             </div>
           </div>
           <div class="flex-col">
@@ -204,7 +222,7 @@
           <h3>Маршрут выполнения операций</h3>
           <div id="route-table-wrapper"></div>
           <h3>Добавить операцию в маршрут</h3>
-          <form id="route-form" class="flex" style="flex-wrap:wrap;">
+          <form id="route-form" class="flex route-form-grid" style="flex-wrap:wrap;">
             <div class="flex-col" style="flex:1 1 140px;">
               <label for="route-op-code-filter">Поиск по коду</label>
               <input id="route-op-code-filter" placeholder="Напишите код" />

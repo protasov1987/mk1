@@ -210,6 +210,13 @@ function recalcCardStatus(card) {
 
 function normalizeCard(card) {
   const safeCard = deepClone(card);
+  const qtyNumber = parseInt(safeCard.quantity, 10);
+  safeCard.quantity = Number.isFinite(qtyNumber) ? qtyNumber : '';
+  safeCard.name = safeCard.name || 'Карта';
+  safeCard.orderNo = safeCard.orderNo || '';
+  safeCard.desc = safeCard.desc || '';
+  safeCard.drawing = safeCard.drawing || '';
+  safeCard.material = safeCard.material || '';
   safeCard.operations = (safeCard.operations || []).map(op => ({
     ...op,
     opCode: op.opCode || '',

@@ -150,6 +150,9 @@ function ensureAttachments(card) {
 function ensureCardMeta(card, options = {}) {
   if (!card) return;
   const { skipSnapshot = false } = options;
+  if (card.quantity == null) card.quantity = '';
+  if (typeof card.drawing !== 'string') card.drawing = card.drawing ? String(card.drawing) : '';
+  if (typeof card.material !== 'string') card.material = card.material ? String(card.material) : '';
   if (typeof card.createdAt !== 'number') {
     card.createdAt = Date.now();
   }
@@ -637,6 +640,9 @@ function ensureDefaults() {
         id: demoId,
         barcode: generateUniqueEAN13(),
         name: 'Вал привода Ø60',
+        quantity: 1,
+        drawing: 'DWG-001',
+        material: 'Сталь',
         orderNo: 'DEMO-001',
         desc: 'Демонстрационная карта для примера.',
         status: 'NOT_STARTED',
@@ -930,6 +936,9 @@ function createEmptyCardDraft() {
     id: genId('card'),
     barcode: generateUniqueEAN13(),
     name: 'Новая карта',
+    quantity: '',
+    drawing: '',
+    material: '',
     orderNo: '',
     desc: '',
     status: 'NOT_STARTED',
@@ -959,7 +968,10 @@ function openCardModal(cardId) {
   document.getElementById('card-modal-title').textContent = activeCardIsNew ? 'Создание карты' : 'Редактирование карты';
   document.getElementById('card-id').value = activeCardDraft.id;
   document.getElementById('card-name').value = activeCardDraft.name || '';
+  document.getElementById('card-qty').value = activeCardDraft.quantity != null ? activeCardDraft.quantity : '';
   document.getElementById('card-order').value = activeCardDraft.orderNo || '';
+  document.getElementById('card-drawing').value = activeCardDraft.drawing || '';
+  document.getElementById('card-material').value = activeCardDraft.material || '';
   document.getElementById('card-desc').value = activeCardDraft.desc || '';
   document.getElementById('card-status-text').textContent = cardStatusText(activeCardDraft);
   const attachBtn = document.getElementById('card-attachments-btn');
@@ -1027,7 +1039,7 @@ function saveCardDraft() {
 function logCardDifferences(original, updated) {
   if (!original || !updated) return;
   const cardRef = updated;
-  const fields = ['name', 'orderNo', 'desc'];
+  const fields = ['name', 'orderNo', 'desc', 'quantity', 'drawing', 'material'];
   fields.forEach(field => {
     if ((original[field] || '') !== (updated[field] || '')) {
       recordCardLog(cardRef, { action: 'Изменение поля', object: 'Карта', field, oldValue: original[field] || '', newValue: updated[field] || '' });
@@ -1345,9 +1357,13 @@ function buildInitialSummaryTable(card) {
 function buildInitialSnapshotHtml(card) {
   if (!card) return '';
   const snapshot = card.initialSnapshot || card;
+  const qtyText = formatQuantityValue(snapshot.quantity);
   const metaHtml = '<div class="log-initial-meta">' +
     '<div><strong>Наименование:</strong> ' + escapeHtml(snapshot.name || '') + '</div>' +
+    '<div><strong>Количество, шт:</strong> ' + escapeHtml(qtyText || '') + '</div>' +
     '<div><strong>Заказ:</strong> ' + escapeHtml(snapshot.orderNo || '') + '</div>' +
+    '<div><strong>Чертёж / обозначение:</strong> ' + escapeHtml(snapshot.drawing || '') + '</div>' +
+    '<div><strong>Материал:</strong> ' + escapeHtml(snapshot.material || '') + '</div>' +
     '<div><strong>Описание:</strong> ' + escapeHtml(snapshot.desc || '') + '</div>' +
     '</div>';
   const opsHtml = buildInitialSummaryTable(snapshot);
@@ -1416,9 +1432,12 @@ function printSummaryTable() {
     .barcode-print { display: flex; align-items: center; gap: 12px; margin: 8px 0; }
     .meta-print { margin: 2px 0; font-size: 13px; }
     .meta-stack { display: flex; flex-direction: column; gap: 2px; }
+    .summary-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+    .summary-header .meta-stack { align-items: flex-end; text-align: right; }
   `;
   win.document.write('<html><head><title>Сводная таблица</title><style>' + styles + '</style></head><body>');
   win.document.write('<h2>' + escapeHtml(card.name || '') + '</h2>');
+  win.document.write('<div class="summary-header">');
   win.document.write('<div class="barcode-print">');
   if (barcodeData) {
     win.document.write('<img src="' + barcodeData + '" style="max-height:80px;" />');
@@ -1426,9 +1445,15 @@ function printSummaryTable() {
   win.document.write('<div class="meta-stack">');
   win.document.write('<div class="meta-print"><strong>№ карты:</strong> ' + escapeHtml(card.barcode || '') + '</div>');
   win.document.write('<div class="meta-print"><strong>Заказ:</strong> ' + escapeHtml(card.orderNo || '') + '</div>');
+  win.document.write('</div></div>');
+  win.document.write('<div class="meta-stack">');
+  win.document.write('<div class="meta-print"><strong>Количество, шт:</strong> ' + escapeHtml(formatQuantityValue(card.quantity)) + '</div>');
+  win.document.write('<div class="meta-print"><strong>Чертёж / обозначение:</strong> ' + escapeHtml(card.drawing || '') + '</div>');
+  win.document.write('<div class="meta-print"><strong>Материал:</strong> ' + escapeHtml(card.material || '') + '</div>');
   win.document.write('<div class="meta-print"><strong>Описание:</strong> ' + escapeHtml(card.desc || '') + '</div>');
   win.document.write('<div class="meta-print"><strong>Статус:</strong> ' + escapeHtml(cardStatusText(card)) + '</div>');
-  win.document.write('</div></div>');
+  win.document.write('</div>');
+  win.document.write('</div>');
   win.document.write(summaryHtml);
   win.document.write('</body></html>');
   win.document.close();
@@ -1460,6 +1485,9 @@ function printFullLog() {
   win.document.write('<html><head><title>История изменений</title><style>' + styles + '</style></head><body>');
   win.document.write('<h2>' + escapeHtml(card.name || '') + '</h2>');
   win.document.write('<div class="meta-print"><strong>Заказ:</strong> ' + escapeHtml(card.orderNo || '') + '</div>');
+  win.document.write('<div class="meta-print"><strong>Количество, шт:</strong> ' + escapeHtml(formatQuantityValue(card.quantity)) + '</div>');
+  win.document.write('<div class="meta-print"><strong>Чертёж / обозначение:</strong> ' + escapeHtml(card.drawing || '') + '</div>');
+  win.document.write('<div class="meta-print"><strong>Материал:</strong> ' + escapeHtml(card.material || '') + '</div>');
   win.document.write('<div class="meta-print"><strong>Статус:</strong> ' + escapeHtml(cardStatusText(card)) + '</div>');
   win.document.write('<div class="meta-print"><strong>Создана:</strong> ' + escapeHtml(new Date(card.createdAt || Date.now()).toLocaleString()) + '</div>');
   if (barcodeData) {
@@ -1752,6 +1780,32 @@ function buildOperationsTable(card, { readonly = false } = {}) {
   return html;
 }
 
+function formatQuantityValue(val) {
+  if (val === '' || val == null) return '';
+  return val + ' шт';
+}
+
+function buildCardInfoBlock(card) {
+  if (!card) return '';
+  const items = [
+    { label: 'Количество', value: formatQuantityValue(card.quantity) },
+    { label: 'Чертёж / обозначение детали', value: card.drawing },
+    { label: 'Материал', value: card.material },
+    { label: 'Описание', value: card.desc }
+  ];
+
+  let html = '<div class="card-info-block">';
+  items.forEach(item => {
+    const value = item.value ? escapeHtml(item.value) : '—';
+    html += '<div class="info-row">' +
+      '<strong>' + escapeHtml(item.label) + ':</strong>' +
+      '<span>' + value + '</span>' +
+      '</div>';
+  });
+  html += '</div>';
+  return html;
+}
+
 function renderWorkordersTable({ collapseAll = false } = {}) {
   const wrapper = document.getElementById('workorders-table-wrapper');
   const cardsWithOps = cards.filter(c => !c.archived && c.operations && c.operations.length);
@@ -1818,6 +1872,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       '</div>' +
       '</summary>';
 
+    html += buildCardInfoBlock(card);
     html += buildOperationsTable(card, { readonly: false });
     html += '</details>';
   });
@@ -2047,6 +2102,7 @@ function renderArchiveTable() {
       '</div>' +
       '</summary>';
 
+    html += buildCardInfoBlock(card);
     html += buildOperationsTable(card, { readonly: true });
     html += '</details>';
   });
@@ -2168,6 +2224,14 @@ function setupForms() {
     openCardModal();
   });
 
+  const directoryPanel = document.getElementById('directory-inline');
+  const directoryToggle = document.getElementById('btn-toggle-directory');
+  if (directoryToggle && directoryPanel) {
+    directoryToggle.addEventListener('click', () => {
+      directoryPanel.classList.toggle('hidden');
+    });
+  }
+
   const cardForm = document.getElementById('card-form');
   if (cardForm) {
     cardForm.addEventListener('submit', e => e.preventDefault());
@@ -2178,7 +2242,12 @@ function setupForms() {
     saveBtn.addEventListener('click', () => {
       if (!activeCardDraft) return;
       activeCardDraft.name = document.getElementById('card-name').value.trim();
+      const qtyRaw = document.getElementById('card-qty').value.trim();
+      const qtyVal = qtyRaw === '' ? '' : Math.max(0, parseInt(qtyRaw, 10) || 0);
+      activeCardDraft.quantity = Number.isFinite(qtyVal) ? qtyVal : '';
       activeCardDraft.orderNo = document.getElementById('card-order').value.trim();
+      activeCardDraft.drawing = document.getElementById('card-drawing').value.trim();
+      activeCardDraft.material = document.getElementById('card-material').value.trim();
       activeCardDraft.desc = document.getElementById('card-desc').value.trim();
       document.getElementById('card-status-text').textContent = cardStatusText(activeCardDraft);
       saveCardDraft();

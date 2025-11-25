@@ -30,7 +30,7 @@ header {
 .clock-display {
   font-weight: 600;
   padding: 2px 6px;
-  border-radius: 6px;
+  border-radius: 4px;
   background: #fff;
   color: #000;
   width: fit-content;
@@ -50,6 +50,18 @@ nav {
   gap: 8px;
   flex-wrap: wrap;
   margin-left: auto;
+}
+
+.cards-toolbar {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 10px;
+}
+
+.cards-toolbar .button-group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .nav-btn {
@@ -292,6 +304,45 @@ tbody tr:nth-child(even) {
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
+}
+
+.card-info-block {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 6px 12px;
+  margin: 8px 0 12px;
+}
+
+.card-info-block .info-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+
+.card-info-block .info-row strong {
+  color: #4b5563;
+}
+
+.directory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.directory-panel h3 {
+  margin-top: 0;
+}
+
+.route-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.route-form-grid .flex-col {
+  margin: 0;
 }
 
 .btn-link {
