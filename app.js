@@ -1395,8 +1395,6 @@ function buildInitialSummaryTable(card) {
       '<td>' + timeCell + '</td>' +
       '<td>' + escapeHtml(op.comment || '') + '</td>' +
       '</tr>';
-
-    html += renderQuantityRow(card, op, { readonly: true, colspan: 9 });
   });
 
   html += '</tbody></table>';
@@ -1491,10 +1489,14 @@ function printCardView(card, { blankQuantities = false } = {}) {
   win.document.write('<div class="barcode-box">');
   if (barcodeData) {
     win.document.write('<img src="' + barcodeData + '" alt="barcode" />');
+  } else if (card.barcode) {
+    win.document.write('<strong>' + escapeHtml(card.barcode) + '</strong>');
   }
-  win.document.write('<strong>' + escapeHtml(card.barcode || '') + '</strong>');
   win.document.write('</div>');
   win.document.write('<div class="meta-stack">');
+  if (!barcodeData && card.barcode) {
+    win.document.write('<div class="meta-item"><strong>№ карты:</strong> ' + escapeHtml(card.barcode) + '</div>');
+  }
   win.document.write('<div class="meta-item"><strong>Наименование:</strong> ' + escapeHtml(card.name || '') + '</div>');
   win.document.write('<div class="meta-item"><strong>Количество, шт:</strong> ' + escapeHtml(qtyText || '') + '</div>');
   win.document.write('<div class="meta-item"><strong>Заказ:</strong> ' + escapeHtml(card.orderNo || '') + '</div>');
@@ -1542,7 +1544,9 @@ function printSummaryTable() {
     win.document.write('<img src="' + barcodeData + '" style="max-height:80px;" />');
   }
   win.document.write('<div class="meta-stack">');
-  win.document.write('<div class="meta-print"><strong>№ карты:</strong> ' + escapeHtml(card.barcode || '') + '</div>');
+  if (!barcodeData && card.barcode) {
+    win.document.write('<div class="meta-print"><strong>№ карты:</strong> ' + escapeHtml(card.barcode) + '</div>');
+  }
   win.document.write('<div class="meta-print"><strong>Заказ:</strong> ' + escapeHtml(card.orderNo || '') + '</div>');
   win.document.write('</div></div>');
   win.document.write('<div class="meta-stack">');
@@ -1593,7 +1597,9 @@ function printFullLog() {
   win.document.write('<div class="meta-print"><strong>Статус:</strong> ' + escapeHtml(cardStatusText(card)) + '</div>');
   win.document.write('<div class="meta-print"><strong>Создана:</strong> ' + escapeHtml(new Date(card.createdAt || Date.now()).toLocaleString()) + '</div>');
   if (barcodeData) {
-    win.document.write('<div class="barcode-print"><img src="' + barcodeData + '" style="max-height:80px;" /><strong>' + escapeHtml(card.barcode || '') + '</strong></div>');
+    win.document.write('<div class="barcode-print"><img src="' + barcodeData + '" style="max-height:80px;" /></div>');
+  } else if (card.barcode) {
+    win.document.write('<div class="barcode-print"><strong>' + escapeHtml(card.barcode) + '</strong></div>');
   }
   win.document.write('<div class="section-spacer"><h3>Вид карты при создании</h3>' + initialHtml + '</div>');
   win.document.write('<div class="section-spacer"><h3>История изменений</h3>' + historyHtml + '</div>');
