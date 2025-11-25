@@ -1391,8 +1391,6 @@ function buildInitialSummaryTable(card) {
       '<td>' + escapeHtml(executorHistory) + '</td>' +
       '<td>' + (op.plannedMinutes || '') + '</td>' +
       '</tr>';
-
-    html += renderQuantityRow(card, op, { readonly: true, colspan: 6 });
   });
 
   html += '</tbody></table>';
