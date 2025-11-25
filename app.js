@@ -1464,10 +1464,10 @@ function closeLogModal() {
   logContextCardId = null;
 }
 
-function printCardView(card) {
+function printCardView(card, { blankQuantities = false } = {}) {
   if (!card) return;
   const barcodeData = getBarcodeDataUrl(card.barcode || '');
-  const opsHtml = buildOperationsTable(card, { readonly: true });
+  const opsHtml = buildOperationsTable(card, { readonly: true, quantityPrintBlanks: blankQuantities });
   const qtyText = formatQuantityValue(card.quantity);
   const win = window.open('', '_blank');
   if (!win) return;
@@ -1817,7 +1817,7 @@ function cardSearchScore(card, term) {
   return score;
 }
 
-function buildOperationsTable(card, { readonly = false } = {}) {
+function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = false } = {}) {
   const opsSorted = [...(card.operations || [])].sort((a, b) => (a.order || 0) - (b.order || 0));
   let html = '<table><thead><tr>' +
     '<th>Порядок</th><th>Участок</th><th>Код операции</th><th>Операция</th><th>Исполнитель</th><th>План (мин)</th><th>Статус</th><th>Текущее / факт. время</th>' +
@@ -1877,7 +1877,7 @@ function buildOperationsTable(card, { readonly = false } = {}) {
       '<td>' + commentCell + '</td>' +
       '</tr>';
 
-    html += renderQuantityRow(card, op, { readonly, colspan: readonly ? 9 : 10 });
+    html += renderQuantityRow(card, op, { readonly, colspan: readonly ? 9 : 10, blankForPrint: quantityPrintBlanks });
   });
 
   html += '</tbody></table>';
@@ -1910,18 +1910,26 @@ function buildCardInfoBlock(card) {
   return html;
 }
 
-function renderQuantityRow(card, op, { readonly = false, colspan = 9 } = {}) {
+function renderQuantityRow(card, op, { readonly = false, colspan = 9, blankForPrint = false } = {}) {
   const totalQty = card && card.quantity !== '' && card.quantity != null ? card.quantity : '';
   const totalLabel = totalQty === '' ? '—' : totalQty + ' шт';
   const base = '<span class="qty-total">Количество по карте: ' + escapeHtml(totalLabel) + '</span>';
+  const lockRow = readonly || op.status === 'DONE';
+  const goodVal = op.goodCount != null ? op.goodCount : 0;
+  const scrapVal = op.scrapCount != null ? op.scrapCount : 0;
+  const holdVal = op.holdCount != null ? op.holdCount : 0;
 
-  if (readonly) {
+  if (lockRow) {
+    const chipGood = blankForPrint ? '____' : escapeHtml(goodVal);
+    const chipScrap = blankForPrint ? '____' : escapeHtml(scrapVal);
+    const chipHold = blankForPrint ? '____' : escapeHtml(holdVal);
+
     return '<tr class="op-qty-row"><td colspan="' + colspan + '">' +
       '<div class="qty-row-content readonly">' +
       base +
-      '<span class="qty-chip">Годные: ' + escapeHtml(op.goodCount != null ? op.goodCount : 0) + '</span>' +
-      '<span class="qty-chip">Брак: ' + escapeHtml(op.scrapCount != null ? op.scrapCount : 0) + '</span>' +
-      '<span class="qty-chip">Задержано: ' + escapeHtml(op.holdCount != null ? op.holdCount : 0) + '</span>' +
+      '<span class="qty-chip">Годные: ' + chipGood + '</span>' +
+      '<span class="qty-chip">Брак: ' + chipScrap + '</span>' +
+      '<span class="qty-chip">Задержано: ' + chipHold + '</span>' +
       '</div>' +
       '</td></tr>';
   }
@@ -1929,9 +1937,9 @@ function renderQuantityRow(card, op, { readonly = false, colspan = 9 } = {}) {
   return '<tr class="op-qty-row" data-card-id="' + card.id + '" data-op-id="' + op.id + '"><td colspan="' + colspan + '">' +
     '<div class="qty-row-content">' +
     base +
-    '<label>Годные <input type="number" class="qty-input" data-qty-type="good" data-card-id="' + card.id + '" data-op-id="' + op.id + '" min="0" value="' + (op.goodCount || 0) + '"></label>' +
-    '<label>Брак <input type="number" class="qty-input" data-qty-type="scrap" data-card-id="' + card.id + '" data-op-id="' + op.id + '" min="0" value="' + (op.scrapCount || 0) + '"></label>' +
-    '<label>Задержано <input type="number" class="qty-input" data-qty-type="hold" data-card-id="' + card.id + '" data-op-id="' + op.id + '" min="0" value="' + (op.holdCount || 0) + '"></label>' +
+    '<label>Годные <input type="number" class="qty-input" data-qty-type="good" data-card-id="' + card.id + '" data-op-id="' + op.id + '" min="0" value="' + goodVal + '"></label>' +
+    '<label>Брак <input type="number" class="qty-input" data-qty-type="scrap" data-card-id="' + card.id + '" data-op-id="' + op.id + '" min="0" value="' + scrapVal + '"></label>' +
+    '<label>Задержано <input type="number" class="qty-input" data-qty-type="hold" data-card-id="' + card.id + '" data-op-id="' + op.id + '" min="0" value="' + holdVal + '"></label>' +
     '</div>' +
     '</td></tr>';
 }
@@ -2427,7 +2435,7 @@ function setupForms() {
     printDraftBtn.addEventListener('click', () => {
       if (!activeCardDraft) return;
       syncCardDraftFromForm();
-      printCardView(activeCardDraft);
+      printCardView(activeCardDraft, { blankQuantities: true });
     });
   }
 
