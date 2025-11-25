@@ -784,6 +784,11 @@ footer {
   margin-bottom: 2px;
 }
 
+.dash-qty-line {
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+
 .dash-comment-op {
   font-weight: 600;
 }

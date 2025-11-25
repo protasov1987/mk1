@@ -762,7 +762,7 @@ function renderDashboard() {
   }
 
   const limited = eligibleCards.slice(0, 5);
-  let html = '<table><thead><tr><th>№ карты (EAN-13)</th><th>Наименование</th><th>Заказ</th><th>Статус / операции</th><th>Выполнено операций</th><th>Комментарии</th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th>№ карты (EAN-13)</th><th>Наименование</th><th>Заказ</th><th>Статус / операции</th><th>Сделано деталей</th><th>Выполнено операций</th><th>Комментарии</th></tr></thead><tbody>';
 
   limited.forEach(card => {
     const opsArr = card.operations || [];
@@ -806,10 +806,20 @@ function renderDashboard() {
       }
     }
 
+    const qtyTotal = toSafeCount(card.quantity);
+    const qtyLines = opsForDisplay.length
+      ? opsForDisplay.map(op => {
+        const good = toSafeCount(op.goodCount || 0);
+        const qtyText = qtyTotal > 0 ? (good + ' из ' + qtyTotal) : '—';
+        return '<div class="dash-qty-line"><span class="dash-comment-op">' + renderOpLabel(op) + ':</span> ' + qtyText + '</div>';
+      })
+      : [];
+
     const completedCount = opsArr.filter(o => o.status === 'DONE').length;
     const commentLines = opsForDisplay
       .filter(o => o.comment)
       .map(o => '<div class="dash-comment-line"><span class="dash-comment-op">' + renderOpLabel(o) + ':</span> ' + escapeHtml(o.comment) + '</div>');
+    const qtyCell = qtyLines.length ? qtyLines.join('') : '—';
     const commentCell = commentLines.join('');
 
     html += '<tr>' +
@@ -817,6 +827,7 @@ function renderDashboard() {
       '<td>' + escapeHtml(card.name) + '</td>' +
       '<td>' + escapeHtml(card.orderNo || '') + '</td>' +
       '<td><span class="dashboard-card-status" data-card-id="' + card.id + '">' + statusHtml + '</span></td>' +
+      '<td>' + qtyCell + '</td>' +
       '<td>' + completedCount + ' из ' + (card.operations ? card.operations.length : 0) + '</td>' +
       '<td>' + commentCell + '</td>' +
       '</tr>';
@@ -1366,35 +1377,22 @@ function buildInitialSummaryTable(card) {
   const opsSorted = [...(card.operations || [])].sort((a, b) => (a.order || 0) - (b.order || 0));
   if (!opsSorted.length) return '<p>Маршрут пока пуст.</p>';
   let html = '<table><thead><tr>' +
-    '<th>Порядок</th><th>Участок</th><th>Код операции</th><th>Операция</th><th>Исполнитель</th><th>План (мин)</th><th>Статус</th><th>Текущее / факт. время</th><th>Комментарии</th>' +
+    '<th>Порядок</th><th>Участок</th><th>Код операции</th><th>Операция</th><th>Исполнитель</th><th>План (мин)</th>' +
     '</tr></thead><tbody>';
 
   opsSorted.forEach((op, idx) => {
-    const rowId = card.id + '::' + op.id;
-    const elapsed = getOperationElapsedSeconds(op);
-    let timeCell = '';
-    if (op.status === 'IN_PROGRESS' || op.status === 'PAUSED') {
-      timeCell = '<span class="wo-timer" data-row-id="' + rowId + '">' + formatSecondsToHMS(elapsed) + '</span>';
-    } else if (op.status === 'DONE') {
-      const seconds = typeof op.elapsedSeconds === 'number' && op.elapsedSeconds
-        ? op.elapsedSeconds
-        : (op.actualSeconds || 0);
-      timeCell = formatSecondsToHMS(seconds);
-    }
-
     const executorHistory = buildExecutorHistory(card, op) || op.executor || '';
 
-    html += '<tr data-row-id="' + rowId + '">' +
+    html += '<tr>' +
       '<td>' + (idx + 1) + '</td>' +
       '<td>' + escapeHtml(op.centerName) + '</td>' +
       '<td>' + escapeHtml(op.opCode || '') + '</td>' +
       '<td>' + renderOpName(op) + '</td>' +
       '<td>' + escapeHtml(executorHistory) + '</td>' +
       '<td>' + (op.plannedMinutes || '') + '</td>' +
-      '<td>' + statusBadge(op.status) + '</td>' +
-      '<td>' + timeCell + '</td>' +
-      '<td>' + escapeHtml(op.comment || '') + '</td>' +
       '</tr>';
+
+    html += renderQuantityRow(card, op, { readonly: true, colspan: 6 });
   });
 
   html += '</tbody></table>';
@@ -1432,7 +1430,15 @@ function renderLogModal(cardId) {
   const barcodeCanvas = document.getElementById('log-barcode-canvas');
   drawBarcodeEAN13(barcodeCanvas, card.barcode || '');
   const barcodeNum = document.getElementById('log-barcode-number');
-  if (barcodeNum) barcodeNum.textContent = card.barcode || '';
+  if (barcodeNum) {
+    if (barcodeCanvas && card.barcode) {
+      barcodeNum.textContent = '';
+      barcodeNum.classList.add('hidden');
+    } else {
+      barcodeNum.textContent = card.barcode || '';
+      barcodeNum.classList.remove('hidden');
+    }
+  }
   const nameEl = document.getElementById('log-card-name');
   if (nameEl) nameEl.textContent = card.name || '';
   const orderEl = document.getElementById('log-card-order');
