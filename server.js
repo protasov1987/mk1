@@ -82,7 +82,10 @@ function createRouteOpFromRefs(op, center, executor, plannedMinutes, order) {
     actualSeconds: null,
     elapsedSeconds: 0,
     order: order || 1,
-    comment: ''
+    comment: '',
+    goodCount: 0,
+    scrapCount: 0,
+    holdCount: 0
   };
 }
 
@@ -226,7 +229,10 @@ function normalizeCard(card) {
     lastPausedAt: typeof op.lastPausedAt === 'number' ? op.lastPausedAt : null,
     finishedAt: op.finishedAt || null,
     status: op.status || 'NOT_STARTED',
-    comment: typeof op.comment === 'string' ? op.comment : ''
+    comment: typeof op.comment === 'string' ? op.comment : '',
+    goodCount: Number.isFinite(parseInt(op.goodCount, 10)) ? Math.max(0, parseInt(op.goodCount, 10)) : 0,
+    scrapCount: Number.isFinite(parseInt(op.scrapCount, 10)) ? Math.max(0, parseInt(op.scrapCount, 10)) : 0,
+    holdCount: Number.isFinite(parseInt(op.holdCount, 10)) ? Math.max(0, parseInt(op.holdCount, 10)) : 0
   }));
   safeCard.archived = Boolean(safeCard.archived);
   safeCard.createdAt = typeof safeCard.createdAt === 'number' ? safeCard.createdAt : Date.now();

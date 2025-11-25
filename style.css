@@ -707,6 +707,41 @@ footer {
   color: #374151;
 }
 
+.op-qty-row td {
+  background: #f9fafb;
+  font-size: 12px;
+}
+
+.qty-row-content {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.qty-row-content label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.qty-row-content input.qty-input {
+  width: 90px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+.qty-row-content .qty-total {
+  font-weight: 700;
+}
+
+.qty-row-content.readonly .qty-chip {
+  background: #e5e7eb;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
 .executor-input {
   width: 100%;
   padding: 6px 8px;

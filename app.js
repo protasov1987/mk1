@@ -134,6 +134,12 @@ function cloneCard(card) {
   return JSON.parse(JSON.stringify(card));
 }
 
+function toSafeCount(val) {
+  const num = parseInt(val, 10);
+  if (!Number.isFinite(num) || num < 0) return 0;
+  return num;
+}
+
 function ensureAttachments(card) {
   if (!card) return;
   if (!Array.isArray(card.attachments)) card.attachments = [];
@@ -164,6 +170,12 @@ function ensureCardMeta(card, options = {}) {
     snapshot.logs = [];
     card.initialSnapshot = snapshot;
   }
+  card.operations = card.operations || [];
+  card.operations.forEach(op => {
+    op.goodCount = toSafeCount(op.goodCount || 0);
+    op.scrapCount = toSafeCount(op.scrapCount || 0);
+    op.holdCount = toSafeCount(op.holdCount || 0);
+  });
 }
 
 function formatLogValue(val) {
@@ -418,7 +430,10 @@ function createRouteOpFromRefs(op, center, executor, plannedMinutes, order) {
     actualSeconds: null,
     elapsedSeconds: 0,
     order: order || 1,
-    comment: ''
+    comment: '',
+    goodCount: 0,
+    scrapCount: 0,
+    holdCount: 0
   };
 }
 
@@ -692,6 +707,9 @@ async function loadData() {
       if (typeof op.elapsedSeconds !== 'number') {
         op.elapsedSeconds = 0;
       }
+      op.goodCount = toSafeCount(op.goodCount || 0);
+      op.scrapCount = toSafeCount(op.scrapCount || 0);
+      op.holdCount = toSafeCount(op.holdCount || 0);
       if (typeof op.firstStartedAt !== 'number') {
         op.firstStartedAt = op.startedAt || null;
       }
@@ -845,6 +863,7 @@ function renderCardsTable() {
       '<td><button class="btn-small clip-btn" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button></td>' +
       '<td><div class="table-actions">' +
       '<button class="btn-small" data-action="edit-card" data-id="' + card.id + '">Открыть</button>' +
+      '<button class="btn-small" data-action="print-card" data-id="' + card.id + '">Печать</button>' +
       '<button class="btn-small" data-action="copy-card" data-id="' + card.id + '">Копировать</button>' +
       '<button class="btn-small btn-danger" data-action="delete-card" data-id="' + card.id + '">Удалить</button>' +
       '</div></td>' +
@@ -862,6 +881,14 @@ function renderCardsTable() {
   wrapper.querySelectorAll('button[data-action="copy-card"]').forEach(btn => {
     btn.addEventListener('click', () => {
       duplicateCard(btn.getAttribute('data-id'));
+    });
+  });
+
+  wrapper.querySelectorAll('button[data-action="print-card"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const card = cards.find(c => c.id === btn.getAttribute('data-id'));
+      if (!card) return;
+      printCardView(card);
     });
   });
 
@@ -916,6 +943,9 @@ function duplicateCard(cardId) {
     elapsedSeconds: 0,
     actualSeconds: null,
     comment: '',
+    goodCount: 0,
+    scrapCount: 0,
+    holdCount: 0,
     order: typeof op.order === 'number' ? op.order : idx + 1
   }));
   recalcCardStatus(copy);
@@ -1005,7 +1035,10 @@ function saveCardDraft() {
   const draft = cloneCard(activeCardDraft);
   draft.operations = (draft.operations || []).map((op, idx) => ({
     ...op,
-    order: typeof op.order === 'number' ? op.order : idx + 1
+    order: typeof op.order === 'number' ? op.order : idx + 1,
+    goodCount: toSafeCount(op.goodCount || 0),
+    scrapCount: toSafeCount(op.scrapCount || 0),
+    holdCount: toSafeCount(op.holdCount || 0)
   }));
   recalcCardStatus(draft);
 
@@ -1034,6 +1067,18 @@ function saveCardDraft() {
   saveData();
   renderEverything();
   closeCardModal();
+}
+
+function syncCardDraftFromForm() {
+  if (!activeCardDraft) return;
+  activeCardDraft.name = document.getElementById('card-name').value.trim();
+  const qtyRaw = document.getElementById('card-qty').value.trim();
+  const qtyVal = qtyRaw === '' ? '' : Math.max(0, parseInt(qtyRaw, 10) || 0);
+  activeCardDraft.quantity = Number.isFinite(qtyVal) ? qtyVal : '';
+  activeCardDraft.orderNo = document.getElementById('card-order').value.trim();
+  activeCardDraft.drawing = document.getElementById('card-drawing').value.trim();
+  activeCardDraft.material = document.getElementById('card-material').value.trim();
+  activeCardDraft.desc = document.getElementById('card-desc').value.trim();
 }
 
 function logCardDifferences(original, updated) {
@@ -1309,6 +1354,8 @@ function buildSummaryTable(card) {
       '<td>' + timeCell + '</td>' +
       '<td>' + escapeHtml(op.comment || '') + '</td>' +
       '</tr>';
+
+    html += renderQuantityRow(card, op, { readonly: true, colspan: 10 });
   });
 
   html += '</tbody></table>';
@@ -1348,6 +1395,8 @@ function buildInitialSummaryTable(card) {
       '<td>' + timeCell + '</td>' +
       '<td>' + escapeHtml(op.comment || '') + '</td>' +
       '</tr>';
+
+    html += renderQuantityRow(card, op, { readonly: true, colspan: 9 });
   });
 
   html += '</tbody></table>';
@@ -1415,6 +1464,53 @@ function closeLogModal() {
   logContextCardId = null;
 }
 
+function printCardView(card) {
+  if (!card) return;
+  const barcodeData = getBarcodeDataUrl(card.barcode || '');
+  const opsHtml = buildOperationsTable(card, { readonly: true });
+  const qtyText = formatQuantityValue(card.quantity);
+  const win = window.open('', '_blank');
+  if (!win) return;
+  const styles = `
+    @page { size: A4 portrait; margin: 12mm; }
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    table { border-collapse: collapse; width: 100%; font-size: 12px; }
+    th, td { border: 1px solid #d1d5db; padding: 6px 8px; text-align: left; vertical-align: top; }
+    thead { background: #f3f4f6; }
+    .print-header { display: flex; gap: 16px; align-items: flex-start; }
+    .barcode-box { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+    .barcode-box img { max-height: 80px; }
+    .meta-stack { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 6px 16px; margin-top: 6px; }
+    .meta-item { font-size: 13px; }
+    .op-qty-row td { background: #f9fafb; }
+    .qty-row-content { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .qty-row-content label { font-weight: 600; }
+  `;
+  win.document.write('<html><head><title>Маршрутная карта</title><style>' + styles + '</style></head><body>');
+  win.document.write('<div class="print-header">');
+  win.document.write('<div class="barcode-box">');
+  if (barcodeData) {
+    win.document.write('<img src="' + barcodeData + '" alt="barcode" />');
+  }
+  win.document.write('<strong>' + escapeHtml(card.barcode || '') + '</strong>');
+  win.document.write('</div>');
+  win.document.write('<div class="meta-stack">');
+  win.document.write('<div class="meta-item"><strong>Наименование:</strong> ' + escapeHtml(card.name || '') + '</div>');
+  win.document.write('<div class="meta-item"><strong>Количество, шт:</strong> ' + escapeHtml(qtyText || '') + '</div>');
+  win.document.write('<div class="meta-item"><strong>Заказ:</strong> ' + escapeHtml(card.orderNo || '') + '</div>');
+  win.document.write('<div class="meta-item"><strong>Чертёж / обозначение:</strong> ' + escapeHtml(card.drawing || '') + '</div>');
+  win.document.write('<div class="meta-item"><strong>Материал:</strong> ' + escapeHtml(card.material || '') + '</div>');
+  win.document.write('<div class="meta-item"><strong>Описание:</strong> ' + escapeHtml(card.desc || '') + '</div>');
+  win.document.write('</div>');
+  win.document.write('</div>');
+  win.document.write('<h3>Маршрут выполнения операций</h3>');
+  win.document.write(opsHtml);
+  win.document.write('</body></html>');
+  win.document.close();
+  win.focus();
+  win.print();
+}
+
 function printSummaryTable() {
   if (!logContextCardId) return;
   const card = cards.find(c => c.id === logContextCardId);
@@ -1429,6 +1525,9 @@ function printSummaryTable() {
     table { border-collapse: collapse; width: 100%; font-size: 12px; }
     th, td { border: 1px solid #d1d5db; padding: 6px 8px; text-align: left; vertical-align: top; }
     thead { background: #f3f4f6; }
+    .op-qty-row td { background: #f9fafb; }
+    .qty-row-content { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .qty-row-content label { font-weight: 600; }
     .barcode-print { display: flex; align-items: center; gap: 12px; margin: 8px 0; }
     .meta-print { margin: 2px 0; font-size: 13px; }
     .meta-stack { display: flex; flex-direction: column; gap: 2px; }
@@ -1480,6 +1579,9 @@ function printFullLog() {
     table { border-collapse: collapse; width: 100%; font-size: 12px; }
     th, td { border: 1px solid #d1d5db; padding: 6px 8px; text-align: left; vertical-align: top; }
     thead { background: #f3f4f6; }
+    .op-qty-row td { background: #f9fafb; }
+    .qty-row-content { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .qty-row-content label { font-weight: 600; }
     .section-spacer { margin-top: 12px; }
   `;
   win.document.write('<html><head><title>История изменений</title><style>' + styles + '</style></head><body>');
@@ -1774,6 +1876,8 @@ function buildOperationsTable(card, { readonly = false } = {}) {
       actionsCell +
       '<td>' + commentCell + '</td>' +
       '</tr>';
+
+    html += renderQuantityRow(card, op, { readonly, colspan: readonly ? 9 : 10 });
   });
 
   html += '</tbody></table>';
@@ -1804,6 +1908,32 @@ function buildCardInfoBlock(card) {
   });
   html += '</div>';
   return html;
+}
+
+function renderQuantityRow(card, op, { readonly = false, colspan = 9 } = {}) {
+  const totalQty = card && card.quantity !== '' && card.quantity != null ? card.quantity : '';
+  const totalLabel = totalQty === '' ? '—' : totalQty + ' шт';
+  const base = '<span class="qty-total">Количество по карте: ' + escapeHtml(totalLabel) + '</span>';
+
+  if (readonly) {
+    return '<tr class="op-qty-row"><td colspan="' + colspan + '">' +
+      '<div class="qty-row-content readonly">' +
+      base +
+      '<span class="qty-chip">Годные: ' + escapeHtml(op.goodCount != null ? op.goodCount : 0) + '</span>' +
+      '<span class="qty-chip">Брак: ' + escapeHtml(op.scrapCount != null ? op.scrapCount : 0) + '</span>' +
+      '<span class="qty-chip">Задержано: ' + escapeHtml(op.holdCount != null ? op.holdCount : 0) + '</span>' +
+      '</div>' +
+      '</td></tr>';
+  }
+
+  return '<tr class="op-qty-row" data-card-id="' + card.id + '" data-op-id="' + op.id + '"><td colspan="' + colspan + '">' +
+    '<div class="qty-row-content">' +
+    base +
+    '<label>Годные <input type="number" class="qty-input" data-qty-type="good" data-card-id="' + card.id + '" data-op-id="' + op.id + '" min="0" value="' + (op.goodCount || 0) + '"></label>' +
+    '<label>Брак <input type="number" class="qty-input" data-qty-type="scrap" data-card-id="' + card.id + '" data-op-id="' + op.id + '" min="0" value="' + (op.scrapCount || 0) + '"></label>' +
+    '<label>Задержано <input type="number" class="qty-input" data-qty-type="hold" data-card-id="' + card.id + '" data-op-id="' + op.id + '" min="0" value="' + (op.holdCount || 0) + '"></label>' +
+    '</div>' +
+    '</td></tr>';
 }
 
 function renderWorkordersTable({ collapseAll = false } = {}) {
@@ -1967,6 +2097,32 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
     });
   });
 
+  wrapper.querySelectorAll('.qty-input').forEach(input => {
+    const cardId = input.getAttribute('data-card-id');
+    const opId = input.getAttribute('data-op-id');
+    const type = input.getAttribute('data-qty-type');
+    const card = cards.find(c => c.id === cardId);
+    const op = card ? (card.operations || []).find(o => o.id === opId) : null;
+    if (!op || !card) return;
+
+    input.addEventListener('input', e => {
+      e.target.value = toSafeCount(e.target.value);
+    });
+
+    input.addEventListener('blur', e => {
+      const val = toSafeCount(e.target.value);
+      const fieldMap = { good: 'goodCount', scrap: 'scrapCount', hold: 'holdCount' };
+      const field = fieldMap[type] || null;
+      if (!field) return;
+      const prev = toSafeCount(op[field] || 0);
+      if (prev === val) return;
+      op[field] = val;
+      recordCardLog(card, { action: 'Количество деталей', object: opLogLabel(op), field, targetId: op.id, oldValue: prev, newValue: val });
+      saveData();
+      renderDashboard();
+    });
+  });
+
   wrapper.querySelectorAll('button[data-action]').forEach(btn => {
     btn.addEventListener('click', () => {
       const action = btn.getAttribute('data-action');
@@ -2018,6 +2174,14 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
         if (op.status === 'IN_PROGRESS') {
           const diff = op.startedAt ? (now - op.startedAt) / 1000 : 0;
           op.elapsedSeconds = (op.elapsedSeconds || 0) + diff;
+        }
+        const qtyTotal = toSafeCount(card.quantity);
+        if (qtyTotal > 0) {
+          const sum = toSafeCount(op.goodCount || 0) + toSafeCount(op.scrapCount || 0) + toSafeCount(op.holdCount || 0);
+          if (sum !== qtyTotal) {
+            alert('Количество деталей не совпадает');
+            return;
+          }
         }
         op.startedAt = null;
         op.finishedAt = now;
@@ -2252,16 +2416,18 @@ function setupForms() {
   if (saveBtn) {
     saveBtn.addEventListener('click', () => {
       if (!activeCardDraft) return;
-      activeCardDraft.name = document.getElementById('card-name').value.trim();
-      const qtyRaw = document.getElementById('card-qty').value.trim();
-      const qtyVal = qtyRaw === '' ? '' : Math.max(0, parseInt(qtyRaw, 10) || 0);
-      activeCardDraft.quantity = Number.isFinite(qtyVal) ? qtyVal : '';
-      activeCardDraft.orderNo = document.getElementById('card-order').value.trim();
-      activeCardDraft.drawing = document.getElementById('card-drawing').value.trim();
-      activeCardDraft.material = document.getElementById('card-material').value.trim();
-      activeCardDraft.desc = document.getElementById('card-desc').value.trim();
+      syncCardDraftFromForm();
       document.getElementById('card-status-text').textContent = cardStatusText(activeCardDraft);
       saveCardDraft();
+    });
+  }
+
+  const printDraftBtn = document.getElementById('card-print-btn');
+  if (printDraftBtn) {
+    printDraftBtn.addEventListener('click', () => {
+      if (!activeCardDraft) return;
+      syncCardDraftFromForm();
+      printCardView(activeCardDraft);
     });
   }
 
