@@ -398,14 +398,21 @@ function setupBarcodeModal() {
       if (!canvas) return;
       const dataUrl = canvas.toDataURL('image/png');
       const code = codeSpan ? codeSpan.textContent : '';
-      const win = window.open('', '_blank');
-      if (!win) return;
-      win.document.write('<html><head><title>Печать штрихкода</title><style>@page { size: A4 landscape; margin: 12mm; }</style></head><body style="text-align:center;">');
-      win.document.write('<img id="barcode-print" src="' + dataUrl + '" style="max-width:100%;"><br>');
-      win.document.write('<div style="margin-top:8px; font-size:16px;">' + code + '</div>');
-      win.document.write('<script>const img=document.getElementById("barcode-print");const tryPrint=()=>{if(!img) return;if(img.complete){setTimeout(()=>{window.focus();window.print();},50);}};img.onload=tryPrint;img.onerror=tryPrint;tryPrint();<\/script>');
-      win.document.write('</body></html>');
-      win.document.close();
+      const loader = new Image();
+      const openPrintWindow = () => {
+        const win = window.open('', '_blank');
+        if (!win) return;
+        win.document.write('<html><head><title>Печать штрихкода</title><style>@page { size: A4 landscape; margin: 12mm; }</style></head><body style="text-align:center;">');
+        win.document.write('<img id="barcode-print" src="' + dataUrl + '" style="max-width:100%;" alt="Штрихкод"><br>');
+        win.document.write('<div style="margin-top:8px; font-size:16px;">' + code + '</div>');
+        win.document.write('<script>const startPrint=()=>{const img=document.getElementById("barcode-print");if(!img) return;const go=()=>{setTimeout(()=>{window.focus();window.print();},50);};if(img.complete){go();}else{img.onload=go;img.onerror=go;}};window.addEventListener("load",startPrint);<\/script>');
+        win.document.write('</body></html>');
+        win.document.close();
+      };
+
+      loader.onload = openPrintWindow;
+      loader.onerror = openPrintWindow;
+      loader.src = dataUrl;
     });
   }
 }
