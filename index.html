@@ -85,10 +85,6 @@
             <div class="directory-panel">
               <h3>Справочник операций</h3>
               <form id="op-form" class="flex" style="flex-wrap:wrap;">
-                <div class="flex-col" style="flex:0 1 160px;">
-                  <label for="op-code">Код операции</label>
-                  <input id="op-code" placeholder="Напр. OP-1234" />
-                </div>
                 <div class="flex-col" style="flex:1 1 200px;">
                   <label for="op-name">Название операции</label>
                   <input id="op-name" required />
@@ -124,6 +120,10 @@
             <input id="workorder-search" placeholder="Введите № EAN-13, название или номер заказа" />
           </div>
           <div class="flex-col" style="flex:0 1 200px;">
+            <label for="workorder-contract">Номер договора</label>
+            <input id="workorder-contract" placeholder="Введите номер договора" />
+          </div>
+          <div class="flex-col" style="flex:0 1 200px;">
             <label for="workorder-status">Статус карты</label>
             <select id="workorder-status">
               <option value="ALL">Все</option>
@@ -155,6 +155,10 @@
           <div class="flex-col" style="flex:1 1 260px;">
             <label for="archive-search">Поиск в архиве (№ карты, название, заказ)</label>
             <input id="archive-search" placeholder="Введите № EAN-13, название или номер заказа" />
+          </div>
+          <div class="flex-col" style="flex:0 1 200px;">
+            <label for="archive-contract">Номер договора</label>
+            <input id="archive-contract" placeholder="Введите номер договора" />
           </div>
           <div class="flex-col" style="flex:0 1 200px;">
             <label for="archive-status">Статус карты</label>
@@ -204,9 +208,13 @@
               <label for="card-drawing">Чертёж / обозначение детали</label>
               <input id="card-drawing" />
             </div>
-            <div class="flex-col">
+            <div class="flex-col" style="flex:3 1 360px;">
               <label for="card-material">Материал</label>
               <input id="card-material" />
+            </div>
+            <div class="flex-col">
+              <label for="card-contract">Номер договора</label>
+              <input id="card-contract" />
             </div>
           </div>
           <div class="flex-col">
@@ -229,8 +237,8 @@
           <h3>Добавить операцию в маршрут</h3>
           <form id="route-form" class="flex route-form-grid" style="flex-wrap:wrap;">
             <div class="flex-col" style="flex:1 1 140px;">
-              <label for="route-op-code-filter">Поиск по коду</label>
-              <input id="route-op-code-filter" placeholder="Напишите код" />
+              <label for="route-op-code">код</label>
+              <input id="route-op-code" placeholder="Напишите код" />
             </div>
             <div class="flex-col" style="flex:2 1 180px;">
               <label for="route-op">Операция</label>
@@ -239,6 +247,10 @@
             <div class="flex-col" style="flex:2 1 180px;">
               <label for="route-center">Участок</label>
               <select id="route-center" required></select>
+            </div>
+            <div class="flex-col" style="flex:1 1 140px;">
+              <label for="route-qty">Количество изделий</label>
+              <input id="route-qty" type="number" min="0" />
             </div>
             <div class="flex-col" style="flex:1 1 120px;">
               <label for="route-executor">Исполнитель</label>
