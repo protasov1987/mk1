@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: mk1-tracker
+    env: node
+    plan: free
+    buildCommand: "npm install"
+    startCommand: "npm start"
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+    disk:
+      name: data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1

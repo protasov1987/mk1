@@ -4,6 +4,7 @@ const API_ENDPOINT = '/api/data';
 let cards = [];
 let ops = [];
 let centers = [];
+let users = [];
 let workorderSearchTerm = '';
 let workorderStatusFilter = 'ALL';
 let archiveSearchTerm = '';
@@ -20,6 +21,12 @@ const ATTACH_ACCEPT = '.pdf,.doc,.docx,.jpg,.jpeg,.png,.zip,.rar,.7z';
 const ATTACH_MAX_SIZE = 15 * 1024 * 1024; // 15 MB
 let logContextCardId = null;
 let clockIntervalId = null;
+let authToken = localStorage.getItem('authToken') || '';
+let currentUser = null;
+let currentAccess = null;
+let accessLevels = [];
+let inactivityTimerId = null;
+const TAB_KEYS = ['dashboard', 'cards', 'workorders', 'archive', 'users', 'access-levels'];
 
 function setConnectionStatus(message, variant = 'info') {
   const banner = document.getElementById('server-status');
@@ -68,6 +75,14 @@ function generateUniqueOpCode(used = new Set()) {
   return code;
 }
 
+function apiFetch(url, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (authToken) {
+    headers.Authorization = 'Bearer ' + authToken;
+  }
+  return fetch(url, { ...options, headers });
+}
+
 function escapeHtml(str) {
   if (str == null) return '';
   return String(str)
@@ -113,6 +128,90 @@ function formatStartEnd(op) {
   }
 
   return '<div class="nk-lines"><div>Н: ' + escapeHtml(formatDateTime(start)) + '</div><div>К: ' + escapeHtml(endLabel) + '</div></div>';
+}
+
+function canViewTab(key) {
+  return Boolean(currentAccess && currentAccess.permissions && currentAccess.permissions.tabs && currentAccess.permissions.tabs[key] && currentAccess.permissions.tabs[key].view);
+}
+
+function canEditTab(key) {
+  return Boolean(currentAccess && currentAccess.permissions && currentAccess.permissions.tabs && currentAccess.permissions.tabs[key] && currentAccess.permissions.tabs[key].edit);
+}
+
+function canUploadFiles() {
+  return Boolean(currentAccess?.permissions?.attachments?.upload);
+}
+
+function canRemoveFiles() {
+  return Boolean(currentAccess?.permissions?.attachments?.remove);
+}
+
+function buildFileLink(fileId) {
+  if (!fileId) return '#';
+  const tokenParam = authToken ? `?token=${encodeURIComponent(authToken)}` : '';
+  return '/files/' + fileId + tokenParam;
+}
+
+function tabPermissionKey(target) {
+  if (target === 'access-levels') return 'access';
+  if (target === 'users') return 'users';
+  return target;
+}
+
+const CODE128_PATTERNS = [
+  '11011001100', '11001101100', '11001100110', '10010011000', '10010001100', '10001001100', '10011001000', '10011000100',
+  '10001100100', '11001001000', '11001000100', '11000100100', '10110011100', '10011011100', '10011001110', '10111001100',
+  '10011101100', '10011100110', '11001110010', '11001011100', '11001001110', '11011100100', '11001110100', '11101101110',
+  '11101001100', '11100101100', '11100100110', '11101100100', '11100110100', '11100110010', '11011011000', '11011000110',
+  '11000110110', '10100011000', '10001011000', '10001000110', '10110001000', '10001101000', '10001100010', '11010001000',
+  '11000101000', '11000100010', '10110111000', '10110001110', '10001101110', '10111011000', '10111000110', '10001110110',
+  '11101110110', '11010001110', '11000101110', '11011101000', '11011100010', '11011101110', '11101011000', '11101000110',
+  '11100010110', '11101101000', '11101100010', '11100011010', '11101111010', '11001000010', '11110001010', '10100110000',
+  '10100001100', '10010110000', '10010000110', '10000101100', '10000100110', '10110010000', '10110000100', '10011010000',
+  '10011000010', '10000110100', '10000110010', '11000010010', '11001010000', '11110111010', '11000010100', '10001111010',
+  '10100111100', '10010111100', '10010011110', '10111100100', '10011110100', '10011110010', '11110100100', '11110010100',
+  '11110010010', '11011011110', '11011110110', '11110110110', '10101111000', '10100011110', '10001011110', '10111101000',
+  '10111100010', '11110101000', '11110100010', '10111011110', '10111101110', '11101011110', '11110101110', '11010000100',
+  '11010010000', '11010011100', '11000111010'
+];
+
+const CODE128_STOP = '1100011101011';
+
+function drawCode128(canvas, text) {
+  if (!canvas || !text) return null;
+  const ctx = canvas.getContext('2d');
+  const values = [];
+  values.push(104); // Start B
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i) - 32;
+    if (code < 0 || code > 95) return null;
+    values.push(code);
+  }
+  let checksum = values[0];
+  for (let i = 1; i < values.length; i++) {
+    checksum += values[i] * i;
+  }
+  checksum = checksum % 103;
+  values.push(checksum);
+  values.push(106); // stop index
+
+  const modules = values
+    .map(idx => CODE128_PATTERNS[idx] || '')
+    .join('') + CODE128_STOP;
+
+  const moduleWidth = 2;
+  const height = 80;
+  canvas.width = modules.length * moduleWidth;
+  canvas.height = height;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#000';
+
+  for (let i = 0; i < modules.length; i++) {
+    if (modules[i] === '1') {
+      ctx.fillRect(i * moduleWidth, 0, moduleWidth, height);
+    }
+  }
+  return canvas.toDataURL('image/png');
 }
 
 // Время операции с учётом пауз / продолжений
@@ -608,10 +707,10 @@ async function saveData() {
       return;
     }
 
-    const res = await fetch(API_ENDPOINT, {
+    const res = await apiFetch(API_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cards, ops, centers })
+      body: JSON.stringify({ cards, ops, centers, users, accessLevels })
     });
     if (!res.ok) {
       throw new Error('Ответ сервера ' + res.status);
@@ -675,12 +774,14 @@ function ensureDefaults() {
 
 async function loadData() {
   try {
-    const res = await fetch(API_ENDPOINT);
+    const res = await apiFetch(API_ENDPOINT);
     if (!res.ok) throw new Error('Ответ сервера ' + res.status);
     const payload = await res.json();
     cards = Array.isArray(payload.cards) ? payload.cards : [];
     ops = Array.isArray(payload.ops) ? payload.ops : [];
     centers = Array.isArray(payload.centers) ? payload.centers : [];
+    users = Array.isArray(payload.users) ? payload.users : [];
+    accessLevels = Array.isArray(payload.accessLevels) ? payload.accessLevels : accessLevels;
     apiOnline = true;
     setConnectionStatus('', 'info');
   } catch (err) {
@@ -1167,7 +1268,11 @@ function renderAttachmentsModal() {
   const title = document.getElementById('attachments-title');
   const list = document.getElementById('attachments-list');
   const uploadHint = document.getElementById('attachments-upload-hint');
+  const addBtn = document.getElementById('attachments-add-btn');
+  const input = document.getElementById('attachments-input');
   if (!card || !list || !title || !uploadHint) return;
+  if (addBtn) addBtn.disabled = !canUploadFiles();
+  if (input) input.disabled = !canUploadFiles();
   ensureAttachments(card);
   title.textContent = card.name || card.barcode || 'Файлы карты';
   const files = card.attachments || [];
@@ -1178,7 +1283,7 @@ function renderAttachmentsModal() {
     files.forEach(file => {
       const date = new Date(file.createdAt || Date.now()).toLocaleString();
       const downloadAttr = attachmentContext.source === 'live'
-        ? 'href="/files/' + file.id + '" target="_blank" rel="noopener"'
+        ? 'href="' + buildFileLink(file.id) + '" target="_blank" rel="noopener"'
         : '';
       html += '<tr>' +
         '<td>' + escapeHtml(file.name || 'файл') + '</td>' +
@@ -1216,6 +1321,10 @@ function renderAttachmentsModal() {
 }
 
 async function addAttachmentsFromFiles(fileList) {
+  if (!canUploadFiles()) {
+    alert('Нет прав на загрузку файлов');
+    return;
+  }
   const card = getAttachmentTargetCard();
   if (!card || !fileList || !fileList.length) return;
   ensureAttachments(card);
@@ -2379,6 +2488,11 @@ function setupNavigation() {
     btn.addEventListener('click', () => {
       const target = btn.getAttribute('data-target');
       if (!target) return;
+      const permKey = tabPermissionKey(target);
+      if (!canViewTab(permKey)) {
+        alert('Нет прав доступа к этому разделу');
+        return;
+      }
 
       document.querySelectorAll('main section').forEach(sec => {
         sec.classList.remove('active');
@@ -2398,6 +2512,44 @@ function setupNavigation() {
       }
     });
   });
+}
+
+function applyAccessVisibility() {
+  const navButtons = document.querySelectorAll('.nav-btn');
+  let activeTab = document.querySelector('main section.active')?.id;
+  TAB_KEYS.forEach(key => {
+    const permKey = tabPermissionKey(key);
+    const canView = canViewTab(permKey);
+    const btn = document.querySelector('.nav-btn[data-target="' + key + '"]');
+    const section = document.getElementById(key);
+    if (btn) {
+      btn.style.display = canView ? '' : 'none';
+      btn.classList.toggle('active', canView && btn.classList.contains('active'));
+    }
+    if (section) {
+      section.classList.toggle('active', section.id === activeTab && canView);
+      section.classList.toggle('hidden', !canView);
+      if (!canView && section.id === activeTab) {
+        activeTab = null;
+      }
+    }
+  });
+
+  if (!activeTab) {
+    const preferred = currentUser && currentUser.name === 'Abyss'
+      ? 'dashboard'
+      : (currentAccess?.landingTab || 'dashboard');
+    const fallback = TAB_KEYS.find(key => canViewTab(tabPermissionKey(key))) || 'dashboard';
+    const target = canViewTab(tabPermissionKey(preferred)) ? preferred : fallback;
+    const button = document.querySelector('.nav-btn[data-target="' + target + '"]');
+    document.querySelectorAll('main section').forEach(sec => sec.classList.remove('active'));
+    document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+    const section = document.getElementById(target);
+    if (section) section.classList.add('active');
+    if (button) button.classList.add('active');
+    if (target === 'workorders') renderWorkordersTable({ collapseAll: true });
+    if (target === 'archive') renderArchiveTable();
+  }
 }
 
 function setupCardsTabs() {
@@ -2422,6 +2574,10 @@ function setupCardsTabs() {
 // === ФОРМЫ ===
 function setupForms() {
   document.getElementById('btn-new-card').addEventListener('click', () => {
+    if (!canEditTab('cards')) {
+      alert('Нет прав на изменение техкарт');
+      return;
+    }
     openCardModal();
   });
 
@@ -2433,6 +2589,10 @@ function setupForms() {
   const saveBtn = document.getElementById('card-save-btn');
   if (saveBtn) {
     saveBtn.addEventListener('click', () => {
+      if (!canEditTab('cards')) {
+        alert('Нет прав на изменение техкарт');
+        return;
+      }
       if (!activeCardDraft) return;
       syncCardDraftFromForm();
       document.getElementById('card-status-text').textContent = cardStatusText(activeCardDraft);
@@ -2630,16 +2790,516 @@ function setupAttachmentControls() {
   }
 }
 
+// === ДОСТУП И ПОЛЬЗОВАТЕЛИ ===
+const PERMISSION_ITEMS = [
+  { key: 'dashboard', label: 'Дашборд' },
+  { key: 'cards', label: 'Тех. карты' },
+  { key: 'workorders', label: 'Трекер' },
+  { key: 'archive', label: 'Архив' },
+  { key: 'users', label: 'Пользователи' },
+  { key: 'access', label: 'Уровни доступа' }
+];
+
+function setUserBadge() {
+  const span = document.getElementById('current-user');
+  const logoutBtn = document.getElementById('btn-logout');
+  if (span) {
+    span.textContent = currentUser ? currentUser.name : '';
+  }
+  if (logoutBtn) {
+    logoutBtn.disabled = !currentUser;
+  }
+}
+
+function toggleAuthOverlay(show) {
+  const overlay = document.getElementById('auth-overlay');
+  if (overlay) {
+    overlay.classList.toggle('hidden', !show);
+  }
+  document.body.classList.toggle('unauthorized', show);
+}
+
+function resetInactivityTimer() {
+  if (!currentAccess) return;
+  const minutes = currentAccess.autoLogoutMinutes || 30;
+  clearTimeout(inactivityTimerId);
+  inactivityTimerId = setTimeout(() => {
+    alert('Сессия завершена по таймауту бездействия');
+    logout();
+  }, minutes * 60 * 1000);
+}
+
+['click', 'keydown', 'mousemove'].forEach(evt => {
+  document.addEventListener(evt, () => {
+    if (currentUser) resetInactivityTimer();
+  });
+});
+
+async function logout(showModal = true) {
+  try {
+    if (authToken) {
+      await apiFetch('/api/auth/logout', { method: 'POST' });
+    }
+  } catch (e) {
+    // ignore
+  }
+  authToken = '';
+  localStorage.removeItem('authToken');
+  currentUser = null;
+  currentAccess = null;
+  cards = [];
+  ops = [];
+  centers = [];
+  users = [];
+  accessLevels = [];
+  renderEverything();
+  applyAccessVisibility();
+  setUserBadge();
+  if (showModal) toggleAuthOverlay(true);
+}
+
+async function performLogin(password) {
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password })
+  });
+  if (!res.ok) {
+    const payload = await res.json().catch(() => ({}));
+    throw new Error(payload.error || 'Неверный пароль');
+  }
+  const payload = await res.json();
+  authToken = payload.token;
+  localStorage.setItem('authToken', authToken);
+  currentUser = payload.user;
+  currentAccess = payload.accessLevel;
+  setUserBadge();
+  toggleAuthOverlay(false);
+  resetInactivityTimer();
+  await loadAccessLevelsFromServer();
+  await loadUsersFromServer();
+  await loadData();
+  applyAccessVisibility();
+  renderEverything();
+}
+
+async function restoreSession() {
+  if (!authToken) {
+    toggleAuthOverlay(true);
+    return;
+  }
+  try {
+    const res = await apiFetch('/api/auth/session');
+    if (!res.ok) throw new Error('401');
+    const payload = await res.json();
+    currentUser = payload.user;
+    currentAccess = payload.accessLevel;
+    setUserBadge();
+    toggleAuthOverlay(false);
+    resetInactivityTimer();
+    await loadAccessLevelsFromServer();
+    await loadUsersFromServer();
+    await loadData();
+    applyAccessVisibility();
+    renderEverything();
+  } catch (err) {
+    await logout(true);
+  }
+}
+
+function renderPermissionsEditor(level) {
+  const container = document.getElementById('level-permissions');
+  if (!container) return;
+  container.innerHTML = '';
+  PERMISSION_ITEMS.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'perm-row';
+    const controls = document.createElement('div');
+    const viewId = `perm-${item.key}-view`;
+    const editId = `perm-${item.key}-edit`;
+    const viewChecked = level?.permissions?.tabs?.[item.key]?.view !== false;
+    const editChecked = level?.permissions?.tabs?.[item.key]?.edit === true;
+    controls.innerHTML = `
+      <label><input type="checkbox" id="${viewId}" ${viewChecked ? 'checked' : ''}/> Просмотр</label>
+      <label><input type="checkbox" id="${editId}" ${editChecked ? 'checked' : ''}/> Изменение</label>
+    `;
+    const title = document.createElement('div');
+    title.textContent = item.label;
+    row.appendChild(title);
+    row.appendChild(controls);
+    container.appendChild(row);
+  });
+
+  const attachRow = document.createElement('div');
+  attachRow.className = 'perm-row';
+  const uploadId = 'perm-attachments-upload';
+  const removeId = 'perm-attachments-remove';
+  const uploadChecked = level?.permissions?.attachments?.upload !== false;
+  const removeChecked = level?.permissions?.attachments?.remove !== false;
+  attachRow.innerHTML = `
+    <div>Файлы</div>
+    <div>
+      <label><input type="checkbox" id="${uploadId}" ${uploadChecked ? 'checked' : ''}/> Загрузка</label>
+      <label><input type="checkbox" id="${removeId}" ${removeChecked ? 'checked' : ''}/> Удаление</label>
+    </div>
+  `;
+  container.appendChild(attachRow);
+}
+
+function getPermissionsFromForm() {
+  const tabs = {};
+  PERMISSION_ITEMS.forEach(item => {
+    const view = document.getElementById(`perm-${item.key}-view`);
+    const edit = document.getElementById(`perm-${item.key}-edit`);
+    tabs[item.key] = {
+      view: view ? view.checked : false,
+      edit: edit ? edit.checked : false
+    };
+  });
+  return {
+    tabs,
+    attachments: {
+      upload: document.getElementById('perm-attachments-upload')?.checked !== false,
+      remove: document.getElementById('perm-attachments-remove')?.checked !== false
+    }
+  };
+}
+
+function renderLevelsTable() {
+  const wrapper = document.getElementById('levels-table');
+  if (!wrapper) return;
+  const rows = accessLevels.map(level => `
+    <tr data-level-id="${level.id}">
+      <td>${escapeHtml(level.name || '')}</td>
+      <td>${escapeHtml(level.description || '')}</td>
+      <td>${escapeHtml(level.autoLogoutMinutes || '')}</td>
+    </tr>
+  `).join('');
+  wrapper.innerHTML = '<table class="simple-table"><thead><tr><th>Название</th><th>Описание</th><th>Автовыход, мин</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  wrapper.querySelectorAll('tr[data-level-id]').forEach(row => {
+    row.addEventListener('click', () => {
+      const id = row.getAttribute('data-level-id');
+      const level = accessLevels.find(l => l.id === id);
+      fillLevelForm(level);
+    });
+  });
+}
+
+function fillLevelForm(level) {
+  const idInput = document.getElementById('level-id');
+  const nameInput = document.getElementById('level-name');
+  const descInput = document.getElementById('level-desc');
+  const landing = document.getElementById('level-landing');
+  const timeout = document.getElementById('level-timeout');
+  if (!level) {
+    if (idInput) idInput.value = '';
+    if (nameInput) nameInput.value = '';
+    if (descInput) descInput.value = '';
+    if (landing) landing.value = 'dashboard';
+    if (timeout) timeout.value = 30;
+    renderPermissionsEditor();
+    return;
+  }
+  if (idInput) idInput.value = level.id;
+  if (nameInput) nameInput.value = level.name || '';
+  if (descInput) descInput.value = level.description || '';
+  if (landing) landing.value = level.landingTab || 'dashboard';
+  if (timeout) timeout.value = level.autoLogoutMinutes || 30;
+  renderPermissionsEditor(level);
+}
+
+async function loadAccessLevelsFromServer() {
+  if (!canViewTab('access')) return;
+  const res = await apiFetch('/api/access-levels');
+  if (res.ok) {
+    const payload = await res.json();
+    accessLevels = Array.isArray(payload.accessLevels) ? payload.accessLevels : accessLevels;
+    renderLevelsTable();
+    fillLevelForm(accessLevels[0]);
+  }
+}
+
+async function saveLevelForm(e) {
+  e.preventDefault();
+  const id = document.getElementById('level-id').value;
+  const payload = {
+    name: document.getElementById('level-name').value,
+    description: document.getElementById('level-desc').value,
+    landingTab: document.getElementById('level-landing').value,
+    autoLogoutMinutes: Number(document.getElementById('level-timeout').value) || 30,
+    permissions: getPermissionsFromForm()
+  };
+  const url = id ? '/api/access-levels/' + id : '/api/access-levels';
+  const method = id ? 'PUT' : 'POST';
+  const res = await apiFetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const hint = document.getElementById('level-form-hint');
+  if (res.ok) {
+    const data = await res.json();
+    accessLevels = data.accessLevels || accessLevels;
+    renderLevelsTable();
+    fillLevelForm(id ? accessLevels.find(l => l.id === id) : accessLevels[accessLevels.length - 1]);
+    if (hint) hint.textContent = 'Сохранено';
+    applyAccessVisibility();
+  } else {
+    const payloadErr = await res.json().catch(() => ({}));
+    if (hint) {
+      hint.textContent = payloadErr.error || 'Ошибка сохранения';
+      hint.classList.add('error');
+    }
+  }
+}
+
+async function deleteLevel() {
+  const id = document.getElementById('level-id').value;
+  if (!id) return;
+  const res = await apiFetch('/api/access-levels/' + id, { method: 'DELETE' });
+  const hint = document.getElementById('level-form-hint');
+  if (res.ok) {
+    const data = await res.json();
+    accessLevels = data.accessLevels || accessLevels;
+    renderLevelsTable();
+    fillLevelForm(accessLevels[0]);
+    if (hint) hint.textContent = 'Удалено';
+    applyAccessVisibility();
+  } else if (hint) {
+    const payloadErr = await res.json().catch(() => ({}));
+    hint.textContent = payloadErr.error || 'Ошибка удаления';
+    hint.classList.add('error');
+  }
+}
+
+function isLocalPasswordUnique(password, excludeId) {
+  return !users.some(u => u.password === password && u.id !== excludeId);
+}
+
+function generateUserPassword() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz0123456789';
+  let pwd = '';
+  while (pwd.length < 8 || !/[A-Za-z]/.test(pwd) || !/\d/.test(pwd) || !isLocalPasswordUnique(pwd)) {
+    pwd = Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  }
+  return pwd;
+}
+
+function renderUsersTable() {
+  const wrapper = document.getElementById('users-table');
+  if (!wrapper) return;
+  const rows = users.map(user => {
+    const level = accessLevels.find(l => l.id === user.accessLevelId);
+    return `<tr data-user-id="${user.id}"><td>${escapeHtml(user.name || '')}</td><td>${escapeHtml(level ? level.name : '')}</td><td>${user.active === false ? 'Неактивен' : 'Активен'}</td></tr>`;
+  }).join('');
+  wrapper.innerHTML = '<table class="simple-table"><thead><tr><th>Имя</th><th>Уровень</th><th>Статус</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  wrapper.querySelectorAll('tr[data-user-id]').forEach(row => {
+    row.addEventListener('click', () => {
+      const id = row.getAttribute('data-user-id');
+      const user = users.find(u => u.id === id);
+      fillUserForm(user);
+    });
+  });
+}
+
+function fillUserForm(user) {
+  const idInput = document.getElementById('user-id');
+  const nameInput = document.getElementById('user-name');
+  const pwdInput = document.getElementById('user-password');
+  const levelSelect = document.getElementById('user-level');
+  const activeChk = document.getElementById('user-active');
+  const hint = document.getElementById('user-form-hint');
+  if (hint) hint.textContent = '';
+  if (!user) {
+    if (idInput) idInput.value = '';
+    if (nameInput) nameInput.value = '';
+    if (pwdInput) pwdInput.value = '';
+    if (levelSelect && accessLevels.length) levelSelect.value = accessLevels[0].id;
+    if (activeChk) activeChk.checked = true;
+    return;
+  }
+  if (idInput) idInput.value = user.id;
+  if (nameInput) nameInput.value = user.name || '';
+  if (pwdInput) pwdInput.value = user.password || '';
+  if (levelSelect) levelSelect.value = user.accessLevelId || accessLevels[0]?.id;
+  if (activeChk) activeChk.checked = user.active !== false;
+  if (user.immutable && hint) {
+    hint.textContent = 'Пароль Abyss фиксированный и не меняется';
+  }
+}
+
+function refreshUserLevelOptions() {
+  const levelSelect = document.getElementById('user-level');
+  if (!levelSelect) return;
+  levelSelect.innerHTML = accessLevels.map(level => `<option value="${level.id}">${escapeHtml(level.name || '')}</option>`).join('');
+}
+
+async function loadUsersFromServer() {
+  if (!canViewTab('users')) return;
+  const res = await apiFetch('/api/users');
+  if (res.ok) {
+    const payload = await res.json();
+    users = Array.isArray(payload.users) ? payload.users : users;
+    accessLevels = Array.isArray(payload.accessLevels) ? payload.accessLevels : accessLevels;
+    refreshUserLevelOptions();
+    renderUsersTable();
+    fillUserForm(users[0]);
+  }
+}
+
+async function saveUser(e) {
+  e.preventDefault();
+  const id = document.getElementById('user-id').value;
+  const name = document.getElementById('user-name').value;
+  const password = document.getElementById('user-password').value;
+  const accessLevelId = document.getElementById('user-level').value;
+  const active = document.getElementById('user-active').checked;
+  const hint = document.getElementById('user-form-hint');
+  if (!password || password.length < 6 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+    if (hint) hint.textContent = 'Пароль должен быть не короче 6 символов и содержать буквы и цифры';
+    return;
+  }
+  const method = id ? 'PUT' : 'POST';
+  const url = id ? '/api/users/' + id : '/api/users';
+  const res = await apiFetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, password, accessLevelId, active })
+  });
+  if (res.ok) {
+    const data = await res.json();
+    users = data.users || users;
+    renderUsersTable();
+    const saved = id ? users.find(u => u.id === id) : users[users.length - 1];
+    fillUserForm(saved);
+    if (hint) hint.textContent = 'Сохранено';
+  } else if (hint) {
+    const payloadErr = await res.json().catch(() => ({}));
+    hint.textContent = payloadErr.error || 'Ошибка сохранения';
+    hint.classList.add('error');
+  }
+}
+
+async function deleteUser() {
+  const id = document.getElementById('user-id').value;
+  const hint = document.getElementById('user-form-hint');
+  if (!id) return;
+  const res = await apiFetch('/api/users/' + id, { method: 'DELETE' });
+  if (res.ok) {
+    const data = await res.json();
+    users = data.users || users;
+    renderUsersTable();
+    fillUserForm(users[0]);
+    if (hint) hint.textContent = 'Удалено';
+  } else if (hint) {
+    const payloadErr = await res.json().catch(() => ({}));
+    hint.textContent = payloadErr.error || 'Ошибка удаления';
+    hint.classList.add('error');
+  }
+}
+
+function printUserPassword() {
+  const name = document.getElementById('user-name').value || '';
+  const password = document.getElementById('user-password').value || '';
+  const canvas = document.createElement('canvas');
+  const dataUrl = drawCode128(canvas, password);
+  const win = window.open('', '_blank', 'width=420,height=320');
+  if (!win) return;
+  win.document.write('<div style="font-family:sans-serif; padding:16px;">');
+  win.document.write('<h3>Пароль пользователя</h3>');
+  win.document.write('<p><strong>' + escapeHtml(name) + '</strong></p>');
+  if (dataUrl) {
+    win.document.write('<img src="' + dataUrl + '" style="max-width:360px; height:80px;" />');
+  } else {
+    win.document.write('<p>' + escapeHtml(password) + '</p>');
+  }
+  win.document.write('<p>Пароль: ' + escapeHtml(password) + '</p>');
+  win.document.write('</div>');
+  win.print();
+}
+
+function setupUserAndAccessUi() {
+  const authForm = document.getElementById('auth-form');
+  if (authForm) {
+    authForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const pwd = document.getElementById('auth-password').value;
+      const errorLabel = document.getElementById('auth-error');
+      if (errorLabel) errorLabel.textContent = '';
+      try {
+        await performLogin(pwd);
+      } catch (err) {
+        if (errorLabel) errorLabel.textContent = err.message || 'Ошибка входа';
+      }
+    });
+  }
+
+  const authToggle = document.getElementById('auth-toggle-password');
+  if (authToggle) {
+    authToggle.addEventListener('click', () => {
+      const input = document.getElementById('auth-password');
+      if (!input) return;
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      authToggle.classList.toggle('active', show);
+      const label = show ? 'Скрыть пароль' : 'Показать пароль';
+      authToggle.setAttribute('aria-label', label);
+      authToggle.title = label;
+    });
+  }
+
+  const logoutBtn = document.getElementById('btn-logout');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', () => logout(true));
+  }
+
+  const userForm = document.getElementById('user-form');
+  if (userForm) {
+    userForm.addEventListener('submit', saveUser);
+  }
+  const levelForm = document.getElementById('level-form');
+  if (levelForm) {
+    levelForm.addEventListener('submit', saveLevelForm);
+  }
+  const genBtn = document.getElementById('user-generate');
+  if (genBtn) {
+    genBtn.addEventListener('click', () => {
+      const pwdInput = document.getElementById('user-password');
+      if (pwdInput) pwdInput.value = generateUserPassword();
+    });
+  }
+  const showBtn = document.getElementById('user-show-pass');
+  if (showBtn) {
+    showBtn.addEventListener('click', () => {
+      const pwdInput = document.getElementById('user-password');
+      if (!pwdInput) return;
+      pwdInput.type = pwdInput.type === 'password' ? 'text' : 'password';
+    });
+  }
+  const printBtn = document.getElementById('user-print');
+  if (printBtn) printBtn.addEventListener('click', printUserPassword);
+  const deleteBtn = document.getElementById('user-delete');
+  if (deleteBtn) deleteBtn.addEventListener('click', deleteUser);
+  const newUserBtn = document.getElementById('user-new-btn');
+  if (newUserBtn) newUserBtn.addEventListener('click', () => fillUserForm(null));
+
+  const levelDelete = document.getElementById('level-delete');
+  if (levelDelete) levelDelete.addEventListener('click', deleteLevel);
+  const levelNew = document.getElementById('level-new-btn');
+  if (levelNew) levelNew.addEventListener('click', () => fillLevelForm(null));
+}
+
 // === ИНИЦИАЛИЗАЦИЯ ===
 document.addEventListener('DOMContentLoaded', async () => {
   startRealtimeClock();
-  await loadData();
   setupNavigation();
   setupCardsTabs();
   setupForms();
   setupBarcodeModal();
   setupAttachmentControls();
   setupLogModal();
-  renderEverything();
+  setupUserAndAccessUi();
+  toggleAuthOverlay(true);
+  await restoreSession();
   setInterval(tickTimers, 1000);
 });
