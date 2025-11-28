@@ -3234,6 +3234,20 @@ function setupUserAndAccessUi() {
     });
   }
 
+  const authToggle = document.getElementById('auth-toggle-password');
+  if (authToggle) {
+    authToggle.addEventListener('click', () => {
+      const input = document.getElementById('auth-password');
+      if (!input) return;
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      authToggle.classList.toggle('active', show);
+      const label = show ? 'Скрыть пароль' : 'Показать пароль';
+      authToggle.setAttribute('aria-label', label);
+      authToggle.title = label;
+    });
+  }
+
   const logoutBtn = document.getElementById('btn-logout');
   if (logoutBtn) {
     logoutBtn.addEventListener('click', () => logout(true));

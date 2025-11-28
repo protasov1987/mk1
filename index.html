@@ -271,7 +271,10 @@
       <h2>Авторизация</h2>
       <form id="auth-form" class="flex-col">
         <label for="auth-password">Пароль</label>
-        <input id="auth-password" type="password" required autocomplete="current-password" />
+        <div class="password-field">
+          <input id="auth-password" type="password" required autocomplete="current-password" />
+          <button type="button" id="auth-toggle-password" class="password-toggle" aria-label="Показать пароль" title="Показать пароль"></button>
+        </div>
         <button type="submit" class="btn-primary">Войти</button>
         <div id="auth-error" class="form-hint error"></div>
       </form>

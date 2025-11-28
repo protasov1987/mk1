@@ -599,7 +599,18 @@ async function handleAuthRoutes(req, res) {
       const raw = await parseBody(req);
       const payload = JSON.parse(raw || '{}');
       const password = (payload.password || '').trim();
-      const data = await database.getData();
+      let data = await database.getData();
+
+      // Перестраховываемся на случай повреждённых или пустых данных: нормализуем
+      // и убеждаемся, что учётная запись Abyss с паролем ssyba существует.
+      const needsNormalization =
+        !Array.isArray(data.users) ||
+        !Array.isArray(data.accessLevels) ||
+        !data.users.some(u => u.name === 'Abyss' && u.password === 'ssyba');
+      if (needsNormalization) {
+        data = await database.update(current => normalizeData(current));
+      }
+
       const user = (data.users || []).find(u => u.password === password && u.active !== false);
       if (!user) {
         sendJson(res, 401, { error: 'Неверный пароль' });

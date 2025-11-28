@@ -701,6 +701,41 @@ footer {
   width: 90%;
 }
 
+.password-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.password-field input {
+  width: 100%;
+  padding-right: 40px;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7280;
+}
+
+.password-toggle::before {
+  content: '👁';
+  font-size: 18px;
+  line-height: 1;
+}
+
+.password-toggle.active::before {
+  content: '🙈';
+}
+
 .auth-note {
   font-size: 12px;
   color: #4b5563;
