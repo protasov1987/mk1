@@ -398,15 +398,26 @@ function setupBarcodeModal() {
       if (!canvas) return;
       const dataUrl = canvas.toDataURL('image/png');
       const code = codeSpan ? codeSpan.textContent : '';
-      const win = window.open('', '_blank');
-      if (!win) return;
-      win.document.write('<html><head><title>Печать штрихкода</title></head><body style="text-align:center;">');
-      win.document.write('<img src="' + dataUrl + '" style="max-width:100%;"><br>');
-      win.document.write('<div style="margin-top:8px; font-size:16px;">' + code + '</div>');
-      win.document.write('</body></html>');
-      win.document.close();
-      win.focus();
-      win.print();
+
+      const loader = new Image();
+      const openPrintWindow = () => {
+        const win = window.open('', '_blank');
+        if (!win) return;
+
+        const html = `<!doctype html><html><head><title>Печать штрихкода</title><style>@page { size: A4 landscape; margin: 12mm; }</style></head><body style="text-align:center;">` +
+          `<img id="barcode-print" src="${dataUrl}" style="max-width:100%;" alt="Штрихкод"><br>` +
+          `<div style="margin-top:8px; font-size:16px;">${code}</div>` +
+          `<script>const img=document.getElementById('barcode-print');const trigger=()=>{window.focus();window.print();};if(img){const go=()=>{if(img.decode){img.decode().then(trigger).catch(trigger);}else{trigger();}};if(img.complete){go();}else{img.addEventListener('load',go,{once:true});img.addEventListener('error',trigger,{once:true});}}<\/script>` +
+          '</body></html>';
+
+        win.document.open();
+        win.document.write(html);
+        win.document.close();
+      };
+
+      loader.onload = openPrintWindow;
+      loader.onerror = openPrintWindow;
+      loader.src = dataUrl;
     });
   }
 }
@@ -1474,7 +1485,7 @@ function printCardView(card, { blankQuantities = false } = {}) {
   const win = window.open('', '_blank');
   if (!win) return;
   const styles = `
-    @page { size: A4 portrait; margin: 12mm; }
+    @page { size: A4 landscape; margin: 12mm; }
     body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     table { border-collapse: collapse; width: 100%; font-size: 12px; }
     th, td { border: 1px solid #d1d5db; padding: 6px 8px; text-align: left; vertical-align: top; }
@@ -1492,7 +1503,7 @@ function printCardView(card, { blankQuantities = false } = {}) {
   win.document.write('<div class="print-header">');
   win.document.write('<div class="barcode-box">');
   if (barcodeData) {
-    win.document.write('<img src="' + barcodeData + '" alt="barcode" />');
+    win.document.write('<img id="card-barcode-print" src="' + barcodeData + '" alt="barcode" />');
   } else if (card.barcode) {
     win.document.write('<strong>' + escapeHtml(card.barcode) + '</strong>');
   }
@@ -1511,10 +1522,16 @@ function printCardView(card, { blankQuantities = false } = {}) {
   win.document.write('</div>');
   win.document.write('<h3>Маршрут выполнения операций</h3>');
   win.document.write(opsHtml);
+  win.document.write('<script>\n' +
+    'const img=document.getElementById("card-barcode-print");\n' +
+    'const trigger=()=>{window.focus();window.print();};\n' +
+    'if(img){\n' +
+    '  const go=()=>{if(img.decode){img.decode().then(trigger).catch(trigger);}else{trigger();}};\n' +
+    '  if(img.complete){go();}else{img.addEventListener("load",go,{once:true});img.addEventListener("error",trigger,{once:true});}\n' +
+    '}else{trigger();}\n' +
+    '</script>');
   win.document.write('</body></html>');
   win.document.close();
-  win.focus();
-  win.print();
 }
 
 function printSummaryTable() {
@@ -1651,7 +1668,7 @@ function renderRouteTableDraft() {
   }
   const sortedOps = [...opsArr].sort((a, b) => (a.order || 0) - (b.order || 0));
   let html = '<table><thead><tr>' +
-    '<th>Порядок</th><th>Участок</th><th>Код операции</th><th>Операция</th><th>Исполнитель</th><th>План (мин)</th><th>Статус</th><th>Действия</th>' +
+    '<th>Порядок</th><th>Участок</th><th>Код операции</th><th>Операция</th><th>План (мин)</th><th>Статус</th><th>Действия</th>' +
     '</tr></thead><tbody>';
   sortedOps.forEach((o, index) => {
     html += '<tr data-rop-id="' + o.id + '">' +
@@ -1659,7 +1676,6 @@ function renderRouteTableDraft() {
       '<td>' + escapeHtml(o.centerName) + '</td>' +
       '<td>' + escapeHtml(o.opCode || '') + '</td>' +
       '<td>' + renderOpName(o) + '</td>' +
-      '<td><input class="executor-input" data-rop-id="' + o.id + '" value="' + escapeHtml(o.executor || '') + '" placeholder="ФИО" /></td>' +
       '<td>' + (o.plannedMinutes || '') + '</td>' +
       '<td>' + statusBadge(o.status) + '</td>' +
       '<td><div class="table-actions">' +
@@ -1689,16 +1705,6 @@ function renderRouteTableDraft() {
     });
   });
 
-  wrapper.querySelectorAll('.executor-input').forEach(input => {
-    input.addEventListener('input', e => {
-      const ropId = input.getAttribute('data-rop-id');
-      const value = (e.target.value || '').trim();
-      const op = activeCardDraft.operations.find(o => o.id === ropId);
-      if (!op) return;
-      op.executor = value;
-      document.getElementById('card-status-text').textContent = cardStatusText(activeCardDraft);
-    });
-  });
 }
 
 function moveRouteOpInDraft(ropId, delta) {
@@ -1848,6 +1854,11 @@ function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = fa
       timeCell = formatSecondsToHMS(seconds);
     }
 
+    const executorValue = escapeHtml(op.executor || '');
+    const executorControl = readonly
+      ? executorValue
+      : '<input class="executor-inline" data-card-id="' + card.id + '" data-op-id="' + op.id + '" value="' + executorValue + '" placeholder="Исполнитель" />';
+
     let actionsHtml = '';
     if (!readonly) {
       if (op.status === 'NOT_STARTED' || !op.status) {
@@ -1879,7 +1890,7 @@ function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = fa
       '<td>' + escapeHtml(op.centerName) + '</td>' +
       '<td>' + escapeHtml(op.opCode || '') + '</td>' +
       '<td>' + renderOpName(op) + '</td>' +
-      '<td>' + escapeHtml(op.executor || '') + '</td>' +
+      '<td>' + executorControl + '</td>' +
       '<td>' + (op.plannedMinutes || '') + '</td>' +
       '<td>' + statusBadge(op.status) + '</td>' +
       '<td>' + timeCell + '</td>' +
@@ -2066,6 +2077,34 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       e.stopPropagation();
       const id = btn.getAttribute('data-log-card');
       openLogModal(id);
+    });
+  });
+
+  wrapper.querySelectorAll('.executor-inline').forEach(input => {
+    const cardId = input.getAttribute('data-card-id');
+    const opId = input.getAttribute('data-op-id');
+    const card = cards.find(c => c.id === cardId);
+    const op = card ? (card.operations || []).find(o => o.id === opId) : null;
+    if (!op || !card) return;
+
+    input.addEventListener('focus', () => {
+      input.dataset.prevExecutor = op.executor || '';
+    });
+
+    input.addEventListener('input', e => {
+      op.executor = (e.target.value || '').trim();
+    });
+
+    input.addEventListener('blur', e => {
+      const value = (e.target.value || '').trim();
+      const prev = input.dataset.prevExecutor || '';
+      if (value !== prev) {
+        recordCardLog(card, { action: 'Исполнитель', object: opLogLabel(op), field: 'executor', targetId: op.id, oldValue: prev, newValue: value });
+      }
+      op.executor = value;
+      input.value = value;
+      saveData();
+      renderDashboard();
     });
   });
 
@@ -2461,7 +2500,6 @@ function setupForms() {
     if (!activeCardDraft) return;
     const opId = document.getElementById('route-op').value;
     const centerId = document.getElementById('route-center').value;
-    const executor = document.getElementById('route-executor').value.trim();
     const planned = parseInt(document.getElementById('route-planned').value, 10) || 30;
     const opRef = ops.find(o => o.id === opId);
     const centerRef = centers.find(c => c.id === centerId);
@@ -2469,7 +2507,7 @@ function setupForms() {
     const maxOrder = activeCardDraft.operations && activeCardDraft.operations.length
       ? Math.max.apply(null, activeCardDraft.operations.map(o => o.order || 0))
       : 0;
-    const rop = createRouteOpFromRefs(opRef, centerRef, executor, planned, maxOrder + 1);
+    const rop = createRouteOpFromRefs(opRef, centerRef, '', planned, maxOrder + 1);
     activeCardDraft.operations = activeCardDraft.operations || [];
     activeCardDraft.operations.push(rop);
     document.getElementById('card-status-text').textContent = cardStatusText(activeCardDraft);
