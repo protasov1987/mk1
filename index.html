@@ -17,7 +17,13 @@
         <button class="nav-btn" data-target="cards">Тех. карты</button>
         <button class="nav-btn" data-target="workorders">Трекер</button>
         <button class="nav-btn" data-target="archive">Архив</button>
+        <button class="nav-btn" data-target="users">Пользователи</button>
+        <button class="nav-btn" data-target="access-levels">Уровни доступа</button>
       </nav>
+      <div class="user-box" aria-live="polite">
+        <span id="current-user" class="user-name"></span>
+        <button id="btn-logout" class="btn-small btn-secondary" type="button">Выход</button>
+      </div>
     </header>
 
   <div id="server-status" class="status-banner status-info hidden" role="status" aria-live="polite"></div>
@@ -177,7 +183,104 @@
         <div id="archive-table-wrapper"></div>
       </div>
     </section>
+
+    <!-- Пользователи -->
+    <section id="users" class="hidden">
+      <div class="card">
+        <div class="card-header-row">
+          <h2>Управление пользователями</h2>
+          <button id="user-new-btn" class="btn-primary" type="button">Новый пользователь</button>
+        </div>
+        <div class="grid-2">
+          <div>
+            <h3>Список пользователей</h3>
+            <div id="users-table"></div>
+          </div>
+          <div>
+            <h3>Редактирование</h3>
+            <form id="user-form" class="flex-col">
+              <input type="hidden" id="user-id" />
+              <label for="user-name">Имя пользователя</label>
+              <input id="user-name" required />
+              <label for="user-password">Пароль (буквы+цифры, ≥ 6 символов)</label>
+              <div class="input-row">
+                <input id="user-password" required />
+                <button type="button" id="user-generate" class="btn-secondary">Сгенерировать</button>
+                <button type="button" id="user-print" class="btn-secondary">Печать штрихкода</button>
+              </div>
+              <div class="input-row">
+                <label><input type="checkbox" id="user-active" checked /> Активен</label>
+                <button type="button" id="user-show-pass" class="btn-secondary">Показать</button>
+              </div>
+              <label for="user-level">Уровень доступа</label>
+              <select id="user-level"></select>
+              <div class="form-actions">
+                <button type="submit" class="btn-primary">Сохранить</button>
+                <button type="button" id="user-delete" class="btn-secondary">Удалить</button>
+              </div>
+              <div id="user-form-hint" class="form-hint"></div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Уровни доступа -->
+    <section id="access-levels" class="hidden">
+      <div class="card">
+        <div class="card-header-row">
+          <h2>Уровни доступа</h2>
+          <button id="level-new-btn" class="btn-primary" type="button">Новый уровень</button>
+        </div>
+        <div class="grid-2">
+          <div>
+            <h3>Список уровней</h3>
+            <div id="levels-table"></div>
+          </div>
+          <div>
+            <h3>Настройки уровня</h3>
+            <form id="level-form" class="flex-col">
+              <input type="hidden" id="level-id" />
+              <label for="level-name">Название уровня</label>
+              <input id="level-name" required />
+              <label for="level-desc">Описание</label>
+              <input id="level-desc" />
+              <label for="level-landing">Стартовая вкладка после входа</label>
+              <select id="level-landing">
+                <option value="dashboard">Дашборд</option>
+                <option value="cards">Тех. карты</option>
+                <option value="workorders">Трекер</option>
+              </select>
+              <label for="level-timeout">Автовыход при бездействии (мин)</label>
+              <input id="level-timeout" type="number" min="1" value="30" />
+              <div id="level-permissions" class="permissions-grid"></div>
+              <div class="form-actions">
+                <button type="submit" class="btn-primary">Сохранить</button>
+                <button type="button" id="level-delete" class="btn-secondary">Удалить</button>
+              </div>
+              <div id="level-form-hint" class="form-hint"></div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </section>
   </main>
+
+  <div id="auth-overlay" class="auth-overlay">
+    <div class="auth-modal card">
+      <h2>Авторизация</h2>
+      <form id="auth-form" class="flex-col">
+        <label for="auth-password">Пароль</label>
+        <div class="password-field">
+          <input id="auth-password" type="password" required autocomplete="current-password" />
+          <button type="button" id="auth-toggle-password" class="password-toggle" aria-label="Показать пароль" title="Показать пароль"></button>
+        </div>
+        <button type="submit" class="btn-primary">Войти</button>
+        <div id="auth-error" class="form-hint error"></div>
+      </form>
+      <p class="auth-note">Введите пароль пользователя. По умолчанию администратор Abyss: ssyba.</p>
+    </div>
+  </div>
 
   <div id="card-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="card-modal-title">
     <div class="modal-content card-modal-content">
