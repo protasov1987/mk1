@@ -5,7 +5,7 @@ const url = require('url');
 const { JsonDatabase, deepClone } = require('./db');
 
 const PORT = process.env.PORT || 8000;
-const HOST = process.env.HOST || 'localhost';
+const HOST = process.env.HOST || '0.0.0.0';
 const DATA_DIR = path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'database.json');
 const MAX_BODY_SIZE = 20 * 1024 * 1024; // 20 MB to allow attachments
