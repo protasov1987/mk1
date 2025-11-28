@@ -1503,7 +1503,7 @@ function printCardView(card, { blankQuantities = false } = {}) {
   win.document.write('<div class="print-header">');
   win.document.write('<div class="barcode-box">');
   if (barcodeData) {
-    win.document.write('<img src="' + barcodeData + '" alt="barcode" />');
+    win.document.write('<img id="card-barcode-print" src="' + barcodeData + '" alt="barcode" />');
   } else if (card.barcode) {
     win.document.write('<strong>' + escapeHtml(card.barcode) + '</strong>');
   }
@@ -1522,10 +1522,16 @@ function printCardView(card, { blankQuantities = false } = {}) {
   win.document.write('</div>');
   win.document.write('<h3>Маршрут выполнения операций</h3>');
   win.document.write(opsHtml);
+  win.document.write('<script>\n' +
+    'const img=document.getElementById("card-barcode-print");\n' +
+    'const trigger=()=>{window.focus();window.print();};\n' +
+    'if(img){\n' +
+    '  const go=()=>{if(img.decode){img.decode().then(trigger).catch(trigger);}else{trigger();}};\n' +
+    '  if(img.complete){go();}else{img.addEventListener("load",go,{once:true});img.addEventListener("error",trigger,{once:true});}\n' +
+    '}else{trigger();}\n' +
+    '</script>');
   win.document.write('</body></html>');
   win.document.close();
-  win.focus();
-  win.print();
 }
 
 function printSummaryTable() {
