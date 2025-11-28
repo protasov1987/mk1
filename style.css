@@ -539,6 +539,52 @@ tbody tr:nth-child(even) {
   display: none;
 }
 
+.icon-btn {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #111827;
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0;
+}
+
+.executor-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.executor-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.executor-name {
+  font-weight: 600;
+}
+
+.additional-executor-list {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.executor-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: #e5e7eb;
+  font-size: 12px;
+}
+
 .attachments-table {
   width: 100%;
   border-collapse: collapse;
