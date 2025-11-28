@@ -9,6 +9,13 @@ body {
   color: #222;
 }
 
+body.unauthorized main,
+body.unauthorized nav,
+body.unauthorized header,
+body.unauthorized .user-box {
+  display: none;
+}
+
 header {
   background: #1f2933;
   color: #fff;
@@ -50,6 +57,17 @@ nav {
   gap: 8px;
   flex-wrap: wrap;
   margin-left: auto;
+}
+
+.user-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #e5e7eb;
+}
+
+.user-name {
+  font-weight: 600;
 }
 
 .cards-toolbar {
@@ -553,6 +571,27 @@ tbody tr:nth-child(even) {
   text-align: left;
 }
 
+.simple-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.simple-table th,
+.simple-table td {
+  border: 1px solid #e5e7eb;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.simple-table thead {
+  background: #f3f4f6;
+}
+
+.simple-table tbody tr:hover {
+  background: #f9fafb;
+  cursor: pointer;
+}
+
 .attachments-table thead {
   background: #f3f4f6;
 }
@@ -592,6 +631,79 @@ footer {
   font-size: 11px;
   color: #6b7280;
   padding: 12px 8px 20px;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.card-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.input-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.permissions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.permissions-grid .perm-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.form-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.form-hint {
+  font-size: 12px;
+  color: #4b5563;
+}
+
+.form-hint.error {
+  color: #b91c1c;
+}
+
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.auth-modal {
+  max-width: 360px;
+  width: 90%;
+}
+
+.auth-note {
+  font-size: 12px;
+  color: #4b5563;
 }
 
 .wo-card {
