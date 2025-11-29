@@ -32,22 +32,31 @@ function computeEAN13CheckDigit(base12) {
   return String((10 - mod) % 10);
 }
 
-function generateEAN13() {
-  let base = '';
-  for (let i = 0; i < 12; i++) {
-    base += Math.floor(Math.random() * 10);
-  }
+function buildEAN13FromSequence(sequenceNumber) {
+  const base = String(Math.max(0, parseInt(sequenceNumber, 10) || 0)).padStart(12, '0');
   return base + computeEAN13CheckDigit(base);
 }
 
+function getNextEANSequence(cards) {
+  let maxSeq = 0;
+  cards.forEach(card => {
+    if (!card || !card.barcode || !/^\d{13}$/.test(card.barcode)) return;
+    const seq = parseInt(card.barcode.slice(0, 12), 10);
+    if (Number.isFinite(seq) && seq > maxSeq) maxSeq = seq;
+  });
+  return maxSeq + 1;
+}
+
 function generateUniqueEAN13(cards) {
+  let seq = getNextEANSequence(cards);
   let attempt = 0;
-  while (attempt < 500) {
-    const code = generateEAN13();
+  while (attempt < 1000) {
+    const code = buildEAN13FromSequence(seq);
     if (!cards.some(c => c.barcode === code)) return code;
+    seq++;
     attempt++;
   }
-  return generateEAN13();
+  return buildEAN13FromSequence(seq);
 }
 
 function generateRawOpCode() {
