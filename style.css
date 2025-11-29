@@ -148,6 +148,31 @@ main {
   margin: 0 auto;
 }
 
+.card-page {
+  display: none;
+  margin: 0 auto 16px;
+  max-width: 1200px;
+}
+
+.card-page:not(.hidden) {
+  display: block;
+}
+
+.card-page .card-modal-content {
+  max-width: none;
+  width: 100%;
+  max-height: none;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08);
+}
+
+.card-page .modal-body {
+  max-height: none;
+}
+
+.card-page .modal-actions {
+  justify-content: flex-start;
+}
+
 section {
   display: none;
 }

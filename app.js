@@ -3099,6 +3099,18 @@ function focusCardsSection() {
   setCardsTab('list');
 }
 
+function focusCardsSection() {
+  document.querySelectorAll('main section').forEach(sec => {
+    sec.classList.toggle('active', sec.id === 'cards');
+  });
+  const navButtons = document.querySelectorAll('.nav-btn');
+  navButtons.forEach(btn => {
+    const target = btn.getAttribute('data-target');
+    btn.classList.toggle('active', target === 'cards');
+  });
+  setCardsTab('list');
+}
+
 // === ФОРМЫ ===
 function setupForms() {
   document.getElementById('btn-new-card').addEventListener('click', () => {
