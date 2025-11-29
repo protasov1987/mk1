@@ -14,6 +14,7 @@ let activeCardDraft = null;
 let activeCardOriginalId = null;
 let activeCardIsNew = false;
 let cardsSearchTerm = '';
+let cardsContractTerm = '';
 let workorderContractTerm = '';
 let archiveContractTerm = '';
 let attachmentContext = null;
@@ -798,9 +799,9 @@ function renderDashboard() {
   });
 
   const dashTableWrapper = document.getElementById('dashboard-cards');
-  const eligibleCards = activeCards.filter(card => card.status !== 'DONE' && (card.operations || []).some(o => o.status && o.status !== 'NOT_STARTED'));
+  const eligibleCards = activeCards;
   if (!eligibleCards.length) {
-    dashTableWrapper.innerHTML = '<p>Ещё нет незавершённых карт с выполненными операциями.</p>';
+    dashTableWrapper.innerHTML = '<p>Карт для отображения пока нет.</p>';
     return;
   }
 
@@ -890,13 +891,18 @@ function renderCardsTable() {
   }
 
   const termRaw = cardsSearchTerm.trim();
+  const contractTerm = cardsContractTerm.trim().toLowerCase();
   let sortedCards = [...visibleCards];
   if (termRaw) {
     sortedCards.sort((a, b) => cardSearchScore(b, termRaw) - cardSearchScore(a, termRaw));
   }
-  const filteredCards = termRaw
-    ? sortedCards.filter(card => cardSearchScore(card, termRaw) > 0)
-    : sortedCards;
+  const filteredCards = sortedCards.filter(card => {
+    const matchesContract = contractTerm
+      ? (card.contractNumber || '').toLowerCase().includes(contractTerm)
+      : true;
+    const matchesSearch = termRaw ? cardSearchScore(card, termRaw) > 0 : true;
+    return matchesContract && matchesSearch;
+  });
 
   if (!filteredCards.length) {
     wrapper.innerHTML = '<p>Карты по запросу не найдены.</p>';
@@ -1066,10 +1072,10 @@ function openCardModal(cardId) {
   }
   const routeCodeInput = document.getElementById('route-op-code');
   if (routeCodeInput) routeCodeInput.value = '';
-  const routeOpFilter = document.getElementById('route-op-filter');
-  if (routeOpFilter) routeOpFilter.value = '';
-  const routeCenterFilter = document.getElementById('route-center-filter');
-  if (routeCenterFilter) routeCenterFilter.value = '';
+  const routeOpInput = document.getElementById('route-op');
+  if (routeOpInput) routeOpInput.value = '';
+  const routeCenterInput = document.getElementById('route-center');
+  if (routeCenterInput) routeCenterInput.value = '';
   const routeQtyInput = document.getElementById('route-qty');
   routeQtyManual = false;
   if (routeQtyInput) routeQtyInput.value = activeCardDraft.quantity !== '' ? activeCardDraft.quantity : '';
@@ -1440,6 +1446,60 @@ function buildExecutorHistory(card, op) {
   return chain.filter(Boolean).join(' → ');
 }
 
+function buildAdditionalExecutorsHistory(card, op) {
+  const entries = (card.logs || [])
+    .filter(entry => entry.targetId === op.id && entry.field === 'additionalExecutors')
+    .sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  const lines = [];
+  const seen = new Set();
+
+  entries.forEach(entry => {
+    const oldVal = (entry.oldValue || '').trim();
+    const newVal = (entry.newValue || '').trim();
+    const isCountChange = /^\d+$/.test(newVal) && (!oldVal || /^\d+$/.test(oldVal));
+    if (isCountChange) return;
+
+    if (oldVal && newVal && newVal !== oldVal && newVal !== 'удален') {
+      lines.push(escapeHtml(oldVal) + ' → ' + escapeHtml(newVal));
+      seen.add(oldVal);
+      seen.add(newVal);
+    } else if (!oldVal && newVal && newVal !== 'удален') {
+      lines.push(escapeHtml(newVal));
+      seen.add(newVal);
+    } else if (oldVal && (!newVal || newVal === 'удален')) {
+      lines.push(escapeHtml(oldVal) + ' (удален)');
+      seen.add(oldVal);
+    }
+  });
+
+  const currentExtras = Array.isArray(op.additionalExecutors) ? op.additionalExecutors : [];
+  currentExtras.forEach(name => {
+    const clean = (name || '').trim();
+    if (!clean || seen.has(clean)) return;
+    lines.push(escapeHtml(clean));
+    seen.add(clean);
+  });
+
+  return lines.filter(Boolean);
+}
+
+function buildExecutorHistoryCell(card, op) {
+  const mainHistory = buildExecutorHistory(card, op) || '';
+  const extraHistory = buildAdditionalExecutorsHistory(card, op);
+  if (!mainHistory && !extraHistory.length) return '';
+
+  let html = '';
+  if (mainHistory) {
+    html += '<div class="executor-history-main">' + escapeHtml(mainHistory) + '</div>';
+  }
+  if (extraHistory.length) {
+    html += '<div class="executor-history-extras">' +
+      extraHistory.map(line => '<div class="executor-history-line">' + line + '</div>').join('') +
+      '</div>';
+  }
+  return html;
+}
+
 function buildSummaryTable(card) {
   const opsSorted = [...(card.operations || [])].sort((a, b) => (a.order || 0) - (b.order || 0));
   if (!opsSorted.length) return '<p>Маршрут пока пуст.</p>';
@@ -1460,7 +1520,7 @@ function buildSummaryTable(card) {
       timeCell = formatSecondsToHMS(seconds);
     }
 
-    const executorHistory = buildExecutorHistory(card, op) || op.executor || '';
+    const executorCell = buildExecutorHistoryCell(card, op) || escapeHtml(op.executor || '');
     const startEndCell = formatStartEnd(op);
 
     html += '<tr data-row-id="' + rowId + '">' +
@@ -1468,7 +1528,7 @@ function buildSummaryTable(card) {
       '<td>' + escapeHtml(op.centerName) + '</td>' +
       '<td>' + escapeHtml(op.opCode || '') + '</td>' +
       '<td>' + renderOpName(op) + '</td>' +
-      '<td>' + escapeHtml(executorHistory) + '</td>' +
+      '<td>' + executorCell + '</td>' +
       '<td>' + (op.plannedMinutes || '') + '</td>' +
       '<td>' + statusBadge(op.status) + '</td>' +
       '<td>' + startEndCell + '</td>' +
@@ -1491,14 +1551,14 @@ function buildInitialSummaryTable(card) {
     '</tr></thead><tbody>';
 
   opsSorted.forEach((op, idx) => {
-    const executorHistory = buildExecutorHistory(card, op) || op.executor || '';
+    const executorCell = buildExecutorHistoryCell(card, op) || escapeHtml(op.executor || '');
 
     html += '<tr>' +
       '<td>' + (idx + 1) + '</td>' +
       '<td>' + escapeHtml(op.centerName) + '</td>' +
       '<td>' + escapeHtml(op.opCode || '') + '</td>' +
       '<td>' + renderOpName(op) + '</td>' +
-      '<td>' + escapeHtml(executorHistory) + '</td>' +
+      '<td>' + executorCell + '</td>' +
       '<td>' + (op.plannedMinutes || '') + '</td>' +
       '</tr>';
   });
@@ -1762,7 +1822,7 @@ function renderRouteTableDraft() {
   }
   const sortedOps = [...opsArr].sort((a, b) => (a.order || 0) - (b.order || 0));
   let html = '<table><thead><tr>' +
-    '<th>Порядок</th><th>Участок</th><th>Код операции</th><th>Операция</th><th>Кол-во изделий</th><th>Исполнитель</th><th>План (мин)</th><th>Статус</th><th>Действия</th>' +
+    '<th>Порядок</th><th>Участок</th><th>Код операции</th><th>Операция</th><th>Кол-во изделий</th><th>План (мин)</th><th>Статус</th><th>Действия</th>' +
     '</tr></thead><tbody>';
   sortedOps.forEach((o, index) => {
     html += '<tr data-rop-id="' + o.id + '">' +
@@ -1771,7 +1831,6 @@ function renderRouteTableDraft() {
       '<td><input class="route-code-input" data-rop-id="' + o.id + '" value="' + escapeHtml(o.opCode || '') + '" /></td>' +
       '<td>' + renderOpName(o) + '</td>' +
       '<td><input type="number" min="0" class="route-qty-input" data-rop-id="' + o.id + '" value="' + escapeHtml(getOperationQuantity(o, activeCardDraft)) + '"></td>' +
-      '<td><input class="executor-input" data-rop-id="' + o.id + '" value="' + escapeHtml(o.executor || '') + '" placeholder="ФИО" /></td>' +
       '<td>' + (o.plannedMinutes || '') + '</td>' +
       '<td>' + statusBadge(o.status) + '</td>' +
       '<td><div class="table-actions">' +
@@ -1802,14 +1861,48 @@ function renderRouteTableDraft() {
     });
   });
 
-  wrapper.querySelectorAll('.executor-input').forEach(input => {
-    input.addEventListener('input', e => {
+  wrapper.querySelectorAll('.route-code-input').forEach(input => {
+    input.addEventListener('blur', e => {
+      if (!activeCardDraft) return;
       const ropId = input.getAttribute('data-rop-id');
-      const value = (e.target.value || '').trim();
       const op = activeCardDraft.operations.find(o => o.id === ropId);
       if (!op) return;
-      op.executor = value;
-      document.getElementById('card-status-text').textContent = cardStatusText(activeCardDraft);
+      const prev = op.opCode || '';
+      const value = (e.target.value || '').trim();
+      if (!value) {
+        op.autoCode = true;
+      } else {
+        op.autoCode = false;
+        op.opCode = value;
+      }
+      renumberAutoCodesForCard(activeCardDraft);
+      if (prev !== op.opCode && !activeCardIsNew) {
+        recordCardLog(activeCardDraft, { action: 'Код операции', object: opLogLabel(op), field: 'opCode', targetId: op.id, oldValue: prev, newValue: op.opCode });
+      }
+      renderRouteTableDraft();
+    });
+  });
+
+  wrapper.querySelectorAll('.route-qty-input').forEach(input => {
+    input.addEventListener('input', e => {
+      e.target.value = toSafeCount(e.target.value);
+    });
+    input.addEventListener('blur', e => {
+      if (!activeCardDraft) return;
+      const ropId = input.getAttribute('data-rop-id');
+      const op = activeCardDraft.operations.find(o => o.id === ropId);
+      if (!op) return;
+      const prev = getOperationQuantity(op, activeCardDraft);
+      const raw = e.target.value;
+      if (raw === '') {
+        op.quantity = '';
+      } else {
+        op.quantity = toSafeCount(raw);
+      }
+      if (prev !== op.quantity && !activeCardIsNew) {
+        recordCardLog(activeCardDraft, { action: 'Количество изделий', object: opLogLabel(op), field: 'operationQuantity', targetId: op.id, oldValue: prev, newValue: op.quantity });
+      }
+      renderRouteTableDraft();
     });
   });
 
@@ -1874,16 +1967,15 @@ function moveRouteOpInDraft(ropId, delta) {
 }
 
 function fillRouteSelectors() {
-  const opSelect = document.getElementById('route-op');
-  const centerSelect = document.getElementById('route-center');
-  const opFilterInput = document.getElementById('route-op-filter');
-  const centerFilterInput = document.getElementById('route-center-filter');
-  const opFilter = (opFilterInput ? opFilterInput.value : '').toLowerCase();
-  const centerFilter = (centerFilterInput ? centerFilterInput.value : '').toLowerCase();
-  opSelect.innerHTML = '';
-  centerSelect.innerHTML = '';
-  const currentOp = opSelect.value;
-  const currentCenter = centerSelect.value;
+  const opInput = document.getElementById('route-op');
+  const centerInput = document.getElementById('route-center');
+  const opList = document.getElementById('route-op-options');
+  const centerList = document.getElementById('route-center-options');
+  if (!opList || !centerList) return;
+
+  const opFilter = (opInput ? opInput.value : '').toLowerCase();
+  const centerFilter = (centerInput ? centerInput.value : '').toLowerCase();
+
   const filteredOps = ops.filter(o => {
     if (!opFilter) return true;
     const label = formatOpLabel(o).toLowerCase();
@@ -1897,46 +1989,21 @@ function fillRouteSelectors() {
     return name.includes(centerFilter) || desc.includes(centerFilter);
   });
 
-  if (!filteredOps.length) {
+  opList.innerHTML = '';
+  filteredOps.forEach(o => {
     const opt = document.createElement('option');
-    opt.disabled = true;
-    opt.textContent = 'Нет совпадений';
-    opSelect.appendChild(opt);
-  } else {
-    filteredOps.forEach(o => {
-      const opt = document.createElement('option');
-      opt.value = o.id;
-      opt.textContent = formatOpLabel(o);
-      opSelect.appendChild(opt);
-    });
-    if (currentOp && filteredOps.some(o => o.id === currentOp)) {
-      opSelect.value = currentOp;
-    }
-  }
+    opt.value = formatOpLabel(o);
+    opt.dataset.id = o.id;
+    opList.appendChild(opt);
+  });
 
-  if (!filteredCenters.length) {
+  centerList.innerHTML = '';
+  filteredCenters.forEach(c => {
     const opt = document.createElement('option');
-    opt.disabled = true;
-    opt.textContent = 'Нет совпадений';
-    centerSelect.appendChild(opt);
-  } else {
-    filteredCenters.forEach(c => {
-      const opt = document.createElement('option');
-      opt.value = c.id;
-      opt.textContent = c.name;
-      centerSelect.appendChild(opt);
-    });
-    if (currentCenter && filteredCenters.some(c => c.id === currentCenter)) {
-      centerSelect.value = currentCenter;
-    }
-  }
-
-  if (!opSelect.value && opSelect.options.length) {
-    opSelect.value = opSelect.options[0].value;
-  }
-  if (!centerSelect.value && centerSelect.options.length) {
-    centerSelect.value = centerSelect.options[0].value;
-  }
+    opt.value = c.name;
+    opt.dataset.id = c.id;
+    centerList.appendChild(opt);
+  });
 }
 
 // === СПРАВОЧНИКИ ===
@@ -2704,6 +2771,7 @@ function tickTimers() {
     }
   });
 
+  refreshCardStatuses();
   renderDashboard();
 }
 
@@ -2809,20 +2877,36 @@ function setupForms() {
   document.getElementById('route-form').addEventListener('submit', e => {
     e.preventDefault();
     if (!activeCardDraft) return;
-    const opId = document.getElementById('route-op').value;
-    const centerId = document.getElementById('route-center').value;
-    const executor = document.getElementById('route-executor').value.trim();
+    const opInput = document.getElementById('route-op');
+    const opList = document.getElementById('route-op-options');
+    const centerInput = document.getElementById('route-center');
+    const centerList = document.getElementById('route-center-options');
+    const opMatch = Array.from(opList ? opList.options : []).find(opt => opt.value === (opInput ? opInput.value.trim() : ''));
+    const centerMatch = Array.from(centerList ? centerList.options : []).find(opt => opt.value === (centerInput ? centerInput.value.trim() : ''));
+    const opId = opMatch ? opMatch.dataset.id : null;
+    const centerId = centerMatch ? centerMatch.dataset.id : null;
     const planned = parseInt(document.getElementById('route-planned').value, 10) || 30;
     const codeValue = document.getElementById('route-op-code').value.trim();
     const qtyInput = document.getElementById('route-qty').value.trim();
     const qtyValue = qtyInput === '' ? activeCardDraft.quantity : qtyInput;
-    const opRef = ops.find(o => o.id === opId);
-    const centerRef = centers.find(c => c.id === centerId);
-    if (!opRef || !centerRef) return;
+    let opRef = ops.find(o => o.id === opId);
+    let centerRef = centers.find(c => c.id === centerId);
+    const opTerm = (opInput ? opInput.value : '').trim().toLowerCase();
+    const centerTerm = (centerInput ? centerInput.value : '').trim().toLowerCase();
+    if (!opRef && opTerm) {
+      opRef = ops.find(o => formatOpLabel(o).toLowerCase() === opTerm) || ops.find(o => formatOpLabel(o).toLowerCase().includes(opTerm));
+    }
+    if (!centerRef && centerTerm) {
+      centerRef = centers.find(c => (c.name || '').toLowerCase() === centerTerm) || centers.find(c => (c.name || '').toLowerCase().includes(centerTerm));
+    }
+    if (!opRef || !centerRef) {
+      alert('Выберите операцию и участок из списка.');
+      return;
+    }
     const maxOrder = activeCardDraft.operations && activeCardDraft.operations.length
       ? Math.max.apply(null, activeCardDraft.operations.map(o => o.order || 0))
       : 0;
-    const rop = createRouteOpFromRefs(opRef, centerRef, executor, planned, maxOrder + 1, {
+    const rop = createRouteOpFromRefs(opRef, centerRef, '', planned, maxOrder + 1, {
       code: codeValue,
       autoCode: !codeValue,
       quantity: qtyValue
@@ -2836,6 +2920,8 @@ function setupForms() {
     routeQtyManual = false;
     const qtyField = document.getElementById('route-qty');
     if (qtyField) qtyField.value = activeCardDraft.quantity !== '' ? activeCardDraft.quantity : '';
+    if (opInput) opInput.value = '';
+    if (centerInput) centerInput.value = '';
     fillRouteSelectors();
   });
 
@@ -2890,9 +2976,16 @@ function setupForms() {
 
   const cardsSearchInput = document.getElementById('cards-search');
   const cardsSearchClear = document.getElementById('cards-search-clear');
+  const cardsContractInput = document.getElementById('cards-contract');
   if (cardsSearchInput) {
     cardsSearchInput.addEventListener('input', e => {
       cardsSearchTerm = e.target.value || '';
+      renderCardsTable();
+    });
+  }
+  if (cardsContractInput) {
+    cardsContractInput.addEventListener('input', e => {
+      cardsContractTerm = e.target.value || '';
       renderCardsTable();
     });
   }
@@ -2900,6 +2993,8 @@ function setupForms() {
     cardsSearchClear.addEventListener('click', () => {
       cardsSearchTerm = '';
       if (cardsSearchInput) cardsSearchInput.value = '';
+      cardsContractTerm = '';
+      if (cardsContractInput) cardsContractInput.value = '';
       renderCardsTable();
     });
   }
@@ -2975,7 +3070,12 @@ function setupForms() {
 }
 
 // === ОБЩИЙ РЕНДЕР ===
+function refreshCardStatuses() {
+  cards.forEach(card => recalcCardStatus(card));
+}
+
 function renderEverything() {
+  refreshCardStatuses();
   renderDashboard();
   renderCardsTable();
   renderCentersTable();

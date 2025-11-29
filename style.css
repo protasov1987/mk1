@@ -590,6 +590,21 @@ tbody tr:nth-child(even) {
   font-size: 12px;
 }
 
+.executor-history-main {
+  font-weight: 600;
+}
+
+.executor-history-extras {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.executor-history-line {
+  font-size: 12px;
+  color: #374151;
+}
+
 .attachments-table {
   width: 100%;
   border-collapse: collapse;

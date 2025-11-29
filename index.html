@@ -50,6 +50,10 @@
               <label for="cards-search">Поиск техкарты (№ карты, название, заказ)</label>
               <input id="cards-search" placeholder="Введите № EAN-13, название или номер заказа" />
             </div>
+            <div class="flex-col" style="flex:1 1 200px;">
+              <label for="cards-contract">Поиск по номеру договора</label>
+              <input id="cards-contract" placeholder="Введите номер договора" />
+            </div>
             <div class="flex-col" style="flex:0 0 auto;">
               <button class="btn-secondary" id="cards-search-clear">Сбросить</button>
             </div>
@@ -237,32 +241,22 @@
           <h3>Добавить операцию в маршрут</h3>
           <form id="route-form" class="flex route-form-grid" style="flex-wrap:wrap;">
             <div class="flex-col" style="flex:1 1 140px;">
-              <label for="route-op-code">код</label>
+              <label for="route-op-code">Код операции</label>
               <input id="route-op-code" placeholder="Напишите код" />
             </div>
-            <div class="flex-col" style="flex:2 1 180px;">
-              <label for="route-op-filter">Поиск операции</label>
-              <input id="route-op-filter" placeholder="Начните вводить название или код" />
+            <div class="flex-col" style="flex:2 1 200px;">
+              <label for="route-op">Операции</label>
+              <input id="route-op" list="route-op-options" placeholder="Начните вводить название или код" required />
+              <datalist id="route-op-options"></datalist>
             </div>
-            <div class="flex-col" style="flex:2 1 180px;">
-              <label for="route-op">Операция</label>
-              <select id="route-op" required></select>
-            </div>
-            <div class="flex-col" style="flex:2 1 180px;">
-              <label for="route-center-filter">Поиск участка</label>
-              <input id="route-center-filter" placeholder="Начните вводить участок" />
-            </div>
-            <div class="flex-col" style="flex:2 1 180px;">
-              <label for="route-center">Участок</label>
-              <select id="route-center" required></select>
+            <div class="flex-col" style="flex:2 1 200px;">
+              <label for="route-center">Участки</label>
+              <input id="route-center" list="route-center-options" placeholder="Начните вводить участок" required />
+              <datalist id="route-center-options"></datalist>
             </div>
             <div class="flex-col" style="flex:1 1 140px;">
               <label for="route-qty">Количество изделий</label>
               <input id="route-qty" type="number" min="0" />
-            </div>
-            <div class="flex-col" style="flex:1 1 120px;">
-              <label for="route-executor">Исполнитель</label>
-              <input id="route-executor" placeholder="ФИО" />
             </div>
             <div class="flex-col" style="flex:1 1 120px;">
               <label for="route-planned">Плановое время (мин)</label>
