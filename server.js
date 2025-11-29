@@ -64,16 +64,22 @@ function generateUniqueOpCode(used = new Set()) {
   return code;
 }
 
-function createRouteOpFromRefs(op, center, executor, plannedMinutes, order) {
+function createRouteOpFromRefs(op, center, executor, plannedMinutes, order, options = {}) {
+  const { quantity = '', autoCode = false, code } = options;
   return {
     id: genId('rop'),
     opId: op.id,
-    opCode: op.code || op.opCode || generateUniqueOpCode(),
+    opCode: code || op.code || op.opCode || generateUniqueOpCode(),
     opName: op.name,
     centerId: center.id,
     centerName: center.name,
     executor: executor || '',
     plannedMinutes: plannedMinutes || op.recTime || 30,
+    quantity: quantity === '' || quantity == null ? '' : parseInt(quantity, 10) || 0,
+    autoCode,
+    additionalExecutors: Array.isArray(op.additionalExecutors)
+      ? op.additionalExecutors.slice(0, 2)
+      : [],
     status: 'NOT_STARTED',
     firstStartedAt: null,
     startedAt: null,
@@ -217,6 +223,7 @@ function normalizeCard(card) {
   safeCard.quantity = Number.isFinite(qtyNumber) ? qtyNumber : '';
   safeCard.name = safeCard.name || 'Карта';
   safeCard.orderNo = safeCard.orderNo || '';
+  safeCard.contractNumber = safeCard.contractNumber || '';
   safeCard.desc = safeCard.desc || '';
   safeCard.drawing = safeCard.drawing || '';
   safeCard.material = safeCard.material || '';
@@ -232,7 +239,15 @@ function normalizeCard(card) {
     comment: typeof op.comment === 'string' ? op.comment : '',
     goodCount: Number.isFinite(parseInt(op.goodCount, 10)) ? Math.max(0, parseInt(op.goodCount, 10)) : 0,
     scrapCount: Number.isFinite(parseInt(op.scrapCount, 10)) ? Math.max(0, parseInt(op.scrapCount, 10)) : 0,
-    holdCount: Number.isFinite(parseInt(op.holdCount, 10)) ? Math.max(0, parseInt(op.holdCount, 10)) : 0
+    holdCount: Number.isFinite(parseInt(op.holdCount, 10)) ? Math.max(0, parseInt(op.holdCount, 10)) : 0,
+    quantity: Number.isFinite(parseInt(op.quantity, 10)) ? Math.max(0, parseInt(op.quantity, 10)) : '',
+    autoCode: Boolean(op.autoCode),
+    additionalExecutors: Array.isArray(op.additionalExecutors)
+      ? op.additionalExecutors.map(name => (name || '').toString()).slice(0, 2)
+      : []
+  })).map(op => ({
+    ...op,
+    quantity: op.quantity === '' && safeCard.quantity !== '' ? safeCard.quantity : op.quantity
   }));
   safeCard.archived = Boolean(safeCard.archived);
   safeCard.createdAt = typeof safeCard.createdAt === 'number' ? safeCard.createdAt : Date.now();
@@ -285,10 +300,9 @@ function ensureOperationCodes(data) {
       if (source && source.code) {
         nextOp.opCode = source.code;
       }
-      if (!nextOp.opCode || used.has(nextOp.opCode)) {
-        nextOp.opCode = generateUniqueOpCode(used);
+      if (!nextOp.opCode) {
+        nextOp.opCode = generateUniqueOpCode();
       }
-      used.add(nextOp.opCode);
       return nextOp;
     });
     recalcCardStatus(nextCard);
