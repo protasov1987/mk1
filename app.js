@@ -24,6 +24,7 @@ const ATTACH_ACCEPT = '.pdf,.doc,.docx,.jpg,.jpeg,.png,.zip,.rar,.7z';
 const ATTACH_MAX_SIZE = 15 * 1024 * 1024; // 15 MB
 let logContextCardId = null;
 let clockIntervalId = null;
+const cardsGroupOpen = new Set();
 
 function setConnectionStatus(message, variant = 'info') {
   const banner = document.getElementById('server-status');
@@ -136,6 +137,15 @@ function autoResizeComment(el) {
 
 function cloneCard(card) {
   return JSON.parse(JSON.stringify(card));
+}
+
+function isGroupCard(card) {
+  return Boolean(card && card.isGroup);
+}
+
+function getGroupChildren(group) {
+  if (!group) return [];
+  return cards.filter(c => c.groupId === group.id);
 }
 
 function toSafeCount(val) {
@@ -564,6 +574,31 @@ function createRouteOpFromRefs(op, center, executor, plannedMinutes, order, opti
 }
 
 function recalcCardStatus(card) {
+  if (isGroupCard(card)) {
+    const children = getGroupChildren(card);
+    if (!children.length) {
+      card.status = 'NOT_STARTED';
+      return;
+    }
+    const childStatuses = children.map(c => c.status || 'NOT_STARTED');
+    const allDone = childStatuses.every(s => s === 'DONE');
+    const anyInProgress = childStatuses.some(s => s === 'IN_PROGRESS');
+    const anyPaused = childStatuses.some(s => s === 'PAUSED');
+    const anyDone = childStatuses.some(s => s === 'DONE');
+    const anyNotStarted = childStatuses.some(s => s === 'NOT_STARTED');
+    if (anyInProgress) {
+      card.status = 'IN_PROGRESS';
+    } else if (anyPaused) {
+      card.status = 'PAUSED';
+    } else if (allDone) {
+      card.status = 'DONE';
+    } else if (anyDone && anyNotStarted) {
+      card.status = 'PAUSED';
+    } else {
+      card.status = 'NOT_STARTED';
+    }
+    return;
+  }
   const opsArr = card.operations || [];
   if (!opsArr.length) {
     card.status = 'NOT_STARTED';
@@ -592,6 +627,21 @@ function statusBadge(status) {
 }
 
 function cardStatusText(card) {
+  if (isGroupCard(card)) {
+    const children = getGroupChildren(card);
+    if (!children.length) return 'Не запущена';
+    const anyInProgress = children.some(c => c.status === 'IN_PROGRESS');
+    const anyPaused = children.some(c => c.status === 'PAUSED');
+    const allDone = children.length > 0 && children.every(c => c.status === 'DONE');
+    const anyDone = children.some(c => c.status === 'DONE');
+    const anyNotStarted = children.some(c => c.status === 'NOT_STARTED' || !c.status);
+
+    if (anyInProgress) return 'Выполняется';
+    if (anyPaused) return 'Пауза';
+    if (allDone) return 'Завершена';
+    if (anyDone && anyNotStarted) return 'Пауза';
+    return 'Не запущена';
+  }
   const opsArr = card.operations || [];
 
   const hasStartedOrDoneOrPaused = opsArr.some(o =>
@@ -639,6 +689,21 @@ function cardStatusText(card) {
 }
 
 function getCardProcessState(card) {
+  if (isGroupCard(card)) {
+    const children = getGroupChildren(card).filter(c => !c.archived);
+    if (!children.length) return { key: 'NOT_STARTED', label: 'Не запущено', className: 'not-started' };
+    const childStates = children.map(c => getCardProcessState(c));
+    const hasInProgress = childStates.some(s => s.key === 'IN_PROGRESS');
+    const hasPaused = childStates.some(s => s.key === 'PAUSED' || s.key === 'MIXED');
+    const allDone = childStates.length > 0 && childStates.every(s => s.key === 'DONE');
+    const hasDone = childStates.some(s => s.key === 'DONE');
+    const hasNotStarted = childStates.some(s => s.key === 'NOT_STARTED');
+    if (hasInProgress) return { key: 'IN_PROGRESS', label: 'Выполняется', className: 'in-progress' };
+    if (hasPaused) return { key: 'PAUSED', label: 'Пауза', className: 'paused' };
+    if (allDone) return { key: 'DONE', label: 'Выполнено', className: 'done' };
+    if (hasDone && hasNotStarted) return { key: 'MIXED', label: 'Смешанно', className: 'paused' };
+    return { key: 'NOT_STARTED', label: 'Не запущена', className: 'not-started' };
+  }
   const opsArr = card.operations || [];
   const hasInProgress = opsArr.some(o => o.status === 'IN_PROGRESS');
   const hasPaused = opsArr.some(o => o.status === 'PAUSED');
@@ -882,7 +947,7 @@ async function loadData() {
 // === РЕНДЕРИНГ ДАШБОРДА ===
 function renderDashboard() {
   const statsContainer = document.getElementById('dashboard-stats');
-  const activeCards = cards.filter(c => !c.archived);
+  const activeCards = cards.filter(c => !c.archived && !isGroupCard(c));
   const cardsCount = activeCards.length;
   const inWork = activeCards.filter(c => c.status === 'IN_PROGRESS').length;
   const done = activeCards.filter(c => c.status === 'DONE').length;
@@ -970,9 +1035,10 @@ function renderDashboard() {
     const qtyCell = qtyLines.length ? qtyLines.join('') : '—';
     const commentCell = commentLines.join('');
 
+    const nameCell = (card.groupId ? '<span class="group-marker">(Г)</span>' : '') + escapeHtml(card.name);
     html += '<tr>' +
       '<td>' + escapeHtml(card.barcode || '') + '</td>' +
-      '<td>' + escapeHtml(card.name) + '</td>' +
+      '<td>' + nameCell + '</td>' +
       '<td>' + escapeHtml(card.orderNo || '') + '</td>' +
       '<td><span class="dashboard-card-status" data-card-id="' + card.id + '">' + statusHtml + '</span></td>' +
       '<td>' + qtyCell + '</td>' +
@@ -988,7 +1054,7 @@ function renderDashboard() {
 // === РЕНДЕРИНГ ТЕХ.КАРТ ===
 function renderCardsTable() {
   const wrapper = document.getElementById('cards-table-wrapper');
-  const visibleCards = cards.filter(c => !c.archived);
+  const visibleCards = cards.filter(c => !c.archived && !c.groupId);
   if (!visibleCards.length) {
     wrapper.innerHTML = '<p>Список технологических карт пуст. Нажмите «Создать карту».</p>';
     return;
@@ -996,16 +1062,25 @@ function renderCardsTable() {
 
   const termRaw = cardsSearchTerm.trim();
   const contractTerm = cardsContractTerm.trim().toLowerCase();
-  let sortedCards = [...visibleCards];
-  if (termRaw) {
-    sortedCards.sort((a, b) => cardSearchScore(b, termRaw) - cardSearchScore(a, termRaw));
-  }
-  const filteredCards = sortedCards.filter(card => {
+  const cardMatches = (card) => {
     const matchesContract = contractTerm
       ? (card.contractNumber || '').toLowerCase().includes(contractTerm)
       : true;
     const matchesSearch = termRaw ? cardSearchScore(card, termRaw) > 0 : true;
     return matchesContract && matchesSearch;
+  };
+
+  let sortedCards = [...visibleCards];
+  if (termRaw) {
+    sortedCards.sort((a, b) => cardSearchScore(b, termRaw) - cardSearchScore(a, termRaw));
+  }
+
+  const filteredCards = sortedCards.filter(card => {
+    if (isGroupCard(card)) {
+      const children = getGroupChildren(card).filter(c => !c.archived);
+      return cardMatches(card) || children.some(ch => cardMatches(ch));
+    }
+    return cardMatches(card);
   });
 
   if (!filteredCards.length) {
@@ -1016,7 +1091,51 @@ function renderCardsTable() {
   let html = '<table><thead><tr>' +
     '<th>№ карты (EAN-13)</th><th>Наименование</th><th>Заказ</th><th>Статус</th><th>Операций</th><th>Файлы</th><th>Действия</th>' +
     '</tr></thead><tbody>';
+
   filteredCards.forEach(card => {
+    if (isGroupCard(card)) {
+      const children = getGroupChildren(card).filter(c => !c.archived);
+      const filesCount = (card.attachments || []).length;
+      const opened = cardsGroupOpen.has(card.id);
+      const opsTotal = children.reduce((acc, c) => acc + ((c.operations || []).length), 0);
+      const toggleLabel = opened ? 'Закрыть' : 'Открыть';
+      html += '<tr class="group-row" data-group-id="' + card.id + '">' +
+        '<td><button class="btn-link barcode-link" data-id="' + card.id + '">' + escapeHtml(card.barcode || '') + '</button></td>' +
+        '<td><span class="group-marker">(Г)</span>' + escapeHtml(card.name) + '</td>' +
+        '<td>' + escapeHtml(card.orderNo || '') + '</td>' +
+        '<td></td>' +
+        '<td>' + opsTotal + '</td>' +
+        '<td><button class="btn-small clip-btn" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button></td>' +
+        '<td><div class="table-actions">' +
+        '<button class="btn-small" data-action="toggle-group" data-id="' + card.id + '">' + toggleLabel + '</button>' +
+        '<button class="btn-small" data-action="print-group" data-id="' + card.id + '">Печать</button>' +
+        '<button class="btn-small" data-action="copy-group" data-id="' + card.id + '">Копировать</button>' +
+        '<button class="btn-small btn-danger" data-action="delete-group" data-id="' + card.id + '">Удалить</button>' +
+        '</div></td>' +
+        '</tr>';
+
+      if (opened) {
+        children.forEach(child => {
+          const childFiles = (child.attachments || []).length;
+          html += '<tr class="group-child-row" data-parent="' + card.id + '">' +
+            '<td><button class="btn-link barcode-link" data-id="' + child.id + '">' + escapeHtml(child.barcode || '') + '</button></td>' +
+            '<td class="group-indent"><span class="group-marker">(Г)</span>' + escapeHtml(child.name) + '</td>' +
+            '<td>' + escapeHtml(child.orderNo || '') + '</td>' +
+            '<td>' + cardStatusText(child) + '</td>' +
+            '<td>' + ((child.operations || []).length) + '</td>' +
+            '<td><button class="btn-small clip-btn" data-attach-card="' + child.id + '">📎 <span class="clip-count">' + childFiles + '</span></button></td>' +
+            '<td><div class="table-actions">' +
+            '<button class="btn-small" data-action="edit-card" data-id="' + child.id + '">Открыть</button>' +
+            '<button class="btn-small" data-action="print-card" data-id="' + child.id + '">Печать</button>' +
+            '<button class="btn-small" data-action="copy-card" data-id="' + child.id + '">Копировать</button>' +
+            '<button class="btn-small btn-danger" data-action="delete-card" data-id="' + child.id + '">Удалить</button>' +
+            '</div></td>' +
+            '</tr>';
+        });
+      }
+      return;
+    }
+
     const filesCount = (card.attachments || []).length;
     html += '<tr>' +
       '<td><button class="btn-link barcode-link" data-id="' + card.id + '">' + escapeHtml(card.barcode || '') + '</button></td>' +
@@ -1048,6 +1167,30 @@ function renderCardsTable() {
     });
   });
 
+  wrapper.querySelectorAll('button[data-action="toggle-group"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-id');
+      if (cardsGroupOpen.has(id)) {
+        cardsGroupOpen.delete(id);
+      } else {
+        cardsGroupOpen.add(id);
+      }
+      renderCardsTable();
+    });
+  });
+
+  wrapper.querySelectorAll('button[data-action="copy-group"]').forEach(btn => {
+    btn.addEventListener('click', () => duplicateGroup(btn.getAttribute('data-id')));
+  });
+
+  wrapper.querySelectorAll('button[data-action="delete-group"]').forEach(btn => {
+    btn.addEventListener('click', () => deleteGroup(btn.getAttribute('data-id')));
+  });
+
+  wrapper.querySelectorAll('button[data-action="print-group"]').forEach(btn => {
+    btn.addEventListener('click', () => printGroupList(btn.getAttribute('data-id')));
+  });
+
   wrapper.querySelectorAll('button[data-action="print-card"]').forEach(btn => {
     btn.addEventListener('click', () => {
       const card = cards.find(c => c.id === btn.getAttribute('data-id'));
@@ -1059,7 +1202,13 @@ function renderCardsTable() {
   wrapper.querySelectorAll('button[data-action="delete-card"]').forEach(btn => {
     btn.addEventListener('click', () => {
       const id = btn.getAttribute('data-id');
+      const card = cards.find(c => c.id === id);
+      const parentId = card ? card.groupId : null;
       cards = cards.filter(c => c.id !== id);
+      if (parentId) {
+        const parent = cards.find(c => c.id === parentId);
+        if (parent) recalcCardStatus(parent);
+      }
       saveData();
       renderEverything();
     });
@@ -1081,16 +1230,16 @@ function renderCardsTable() {
   });
 }
 
-function duplicateCard(cardId) {
-  const card = cards.find(c => c.id === cardId);
-  if (!card) return;
-  const copy = cloneCard(card);
+function buildCardCopy(template, { nameOverride, groupId = null } = {}) {
+  const copy = cloneCard(template);
   copy.id = genId('card');
   copy.barcode = generateUniqueEAN13();
-  copy.name = (card.name || '') + ' (копия)';
+  copy.name = nameOverride || template.name || '';
+  copy.groupId = groupId;
+  copy.isGroup = false;
   copy.status = 'NOT_STARTED';
   copy.archived = false;
-  copy.useItemList = Boolean(card.useItemList);
+  copy.useItemList = Boolean(template.useItemList);
   copy.logs = [];
   copy.createdAt = Date.now();
   copy.initialSnapshot = null;
@@ -1099,7 +1248,7 @@ function duplicateCard(cardId) {
     id: genId('file'),
     createdAt: Date.now()
   }));
-  copy.operations = (copy.operations || []).map((op, idx) => ({
+  copy.operations = (copy.operations || []).map((op) => ({
     ...op,
     id: genId('rop'),
     status: 'NOT_STARTED',
@@ -1117,11 +1266,20 @@ function duplicateCard(cardId) {
         id: genId('item'),
         goodCount: 0,
         scrapCount: 0,
-        holdCount: 0
+        holdCount: 0,
+        quantity: toSafeCount(item.quantity || 0) || 1
       }))
       : [],
-    order: typeof op.order === 'number' ? op.order : idx + 1
+    order: typeof op.order === 'number' ? op.order : undefined
   }));
+  renumberAutoCodesForCard(copy);
+  return copy;
+}
+
+function duplicateCard(cardId) {
+  const card = cards.find(c => c.id === cardId);
+  if (!card) return;
+  const copy = buildCardCopy(card, { nameOverride: (card.name || '') + ' (копия)' });
   recalcCardStatus(copy);
   ensureCardMeta(copy);
   if (!copy.initialSnapshot) {
@@ -1132,6 +1290,119 @@ function duplicateCard(cardId) {
   recordCardLog(copy, { action: 'Создание копии', object: 'Карта', oldValue: card.barcode || '', newValue: copy.barcode || '' });
   cards.push(copy);
   saveData();
+  renderEverything();
+}
+
+function duplicateGroup(groupId) {
+  const group = cards.find(c => c.id === groupId && isGroupCard(c));
+  if (!group) return;
+  const children = getGroupChildren(group).filter(c => !c.archived);
+  const newGroup = {
+    id: genId('group'),
+    isGroup: true,
+    name: (group.name || '') + ' (копия)',
+    barcode: generateUniqueEAN13(),
+    orderNo: group.orderNo || '',
+    contractNumber: group.contractNumber || '',
+    status: 'NOT_STARTED',
+    archived: false,
+    attachments: (group.attachments || []).map(file => ({
+      ...file,
+      id: genId('file'),
+      createdAt: Date.now()
+    })),
+    createdAt: Date.now()
+  };
+
+  cards.push(newGroup);
+
+  children.forEach((child, idx) => {
+    const baseName = child.name ? child.name.replace(/^\d+\.\s*/, '') : group.name || 'Карта';
+    const copy = buildCardCopy(child, { nameOverride: (idx + 1) + '. ' + baseName, groupId: newGroup.id });
+    cards.push(copy);
+  });
+
+  recalcCardStatus(newGroup);
+  saveData();
+  renderEverything();
+}
+
+function deleteGroup(groupId) {
+  const group = cards.find(c => c.id === groupId && isGroupCard(c));
+  if (!group) return;
+  cards = cards.filter(c => c.id !== groupId && c.groupId !== groupId);
+  cardsGroupOpen.delete(groupId);
+  saveData();
+  renderEverything();
+}
+
+function printGroupList(groupId) {
+  const group = cards.find(c => c.id === groupId && isGroupCard(c));
+  if (!group) return;
+  const children = getGroupChildren(group).filter(c => !c.archived);
+  const win = window.open('', '_blank');
+  if (!win) return;
+  win.document.write('<html><head><title>Список карт группы</title></head><body>');
+  win.document.write('<h3>Группа: ' + escapeHtml(group.name || '') + '</h3>');
+  win.document.write('<ol>');
+  children.forEach(child => {
+    win.document.write('<li>' + escapeHtml(child.name || '') + ' — ' + escapeHtml(child.barcode || '') + '</li>');
+  });
+  win.document.write('</ol>');
+  win.document.close();
+  win.print();
+}
+
+function openGroupModal() {
+  const modal = document.getElementById('group-modal');
+  if (!modal || !activeCardDraft) return;
+  const nameInput = document.getElementById('group-name');
+  const qtyInput = document.getElementById('group-qty');
+  if (nameInput) nameInput.value = activeCardDraft.name || '';
+  if (qtyInput) qtyInput.value = activeCardDraft.quantity || 2;
+  modal.classList.remove('hidden');
+}
+
+function closeGroupModal() {
+  const modal = document.getElementById('group-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function createGroupFromDraft() {
+  if (!activeCardDraft) return;
+  const nameInput = document.getElementById('group-name');
+  const qtyInput = document.getElementById('group-qty');
+  const groupName = nameInput ? nameInput.value.trim() : '';
+  const qty = qtyInput ? Math.max(1, toSafeCount(qtyInput.value)) : 1;
+  const baseName = activeCardDraft.name || 'Техкарта';
+  const finalGroupName = groupName || baseName;
+
+  const newGroup = {
+    id: genId('group'),
+    isGroup: true,
+    name: finalGroupName,
+    barcode: generateUniqueEAN13(),
+    orderNo: activeCardDraft.orderNo || '',
+    contractNumber: activeCardDraft.contractNumber || '',
+    status: 'NOT_STARTED',
+    archived: false,
+    attachments: [],
+    createdAt: Date.now()
+  };
+
+  cards.push(newGroup);
+
+  for (let i = 0; i < qty; i++) {
+    const child = buildCardCopy(activeCardDraft, { nameOverride: (i + 1) + '. ' + baseName, groupId: newGroup.id });
+    recalcCardStatus(child);
+    ensureCardMeta(child);
+    cards.push(child);
+  }
+
+  recalcCardStatus(newGroup);
+  saveData();
+  closeGroupModal();
+  closeCardModal();
   renderEverything();
 }
 
@@ -2511,12 +2782,13 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
     const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
     const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
     const logButton = ' <button type="button" class="btn-small btn-secondary log-btn" data-log-card="' + card.id + '">Log</button>';
+    const nameLabel = (card.groupId ? '<span class="group-marker">(Г)</span> ' : '') + escapeHtml(card.name || card.id);
 
     html += '<details class="wo-card" data-card-id="' + card.id + '"' + (opened ? ' open' : '') + '>' +
       '<summary>' +
       '<div class="summary-line">' +
       '<div class="summary-text">' +
-      '<strong>' + escapeHtml(card.name || card.id) + '</strong>' +
+      '<strong>' + nameLabel + '</strong>' +
       ' <span class="summary-sub">' +
       (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') + contractText +
       barcodeInline + filesButton + logButton +
@@ -3162,6 +3434,14 @@ function setupForms() {
     });
   }
 
+  const createGroupBtn = document.getElementById('card-create-group-btn');
+  if (createGroupBtn) {
+    createGroupBtn.addEventListener('click', () => {
+      syncCardDraftFromForm();
+      openGroupModal();
+    });
+  }
+
   const printDraftBtn = document.getElementById('card-print-btn');
   if (printDraftBtn) {
     printDraftBtn.addEventListener('click', () => {
@@ -3175,6 +3455,26 @@ function setupForms() {
   if (cancelBtn) {
     cancelBtn.addEventListener('click', () => {
       closeCardModal();
+    });
+  }
+
+  const groupConfirmBtn = document.getElementById('group-create-confirm');
+  if (groupConfirmBtn) {
+    groupConfirmBtn.addEventListener('click', () => {
+      syncCardDraftFromForm();
+      createGroupFromDraft();
+    });
+  }
+
+  const groupCancelBtn = document.getElementById('group-create-cancel');
+  if (groupCancelBtn) {
+    groupCancelBtn.addEventListener('click', () => closeGroupModal());
+  }
+
+  const groupModal = document.getElementById('group-modal');
+  if (groupModal) {
+    groupModal.addEventListener('click', (e) => {
+      if (e.target === groupModal) closeGroupModal();
     });
   }
 

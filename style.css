@@ -302,6 +302,25 @@ thead {
   background: #f3f4f6;
 }
 
+.group-row {
+  background: #f8f5ff;
+}
+
+.group-child-row td {
+  background: #f9fafb;
+}
+
+.group-marker {
+  color: #7c3aed;
+  font-weight: 700;
+  margin-right: 4px;
+}
+
+.group-indent {
+  padding-left: 20px;
+  border-left: 3px solid #e5e7eb;
+}
+
 tbody tr:nth-child(even) {
   background: #f9fafb;
 }
@@ -571,6 +590,12 @@ tbody tr:nth-child(even) {
   font-size: 13px;
 }
 
+.hint {
+  color: #6b7280;
+  font-size: 12px;
+  margin: 6px 0 0;
+}
+
 .log-section th,
 .log-section td {
   border: 1px solid #e5e7eb;
@@ -708,6 +733,18 @@ tbody tr:nth-child(even) {
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid #e5e7eb;
+}
+
+.card-modal-actions {
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal-actions-left,
+.modal-actions-right {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .inset-card {

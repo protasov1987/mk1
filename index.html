@@ -229,10 +229,15 @@
             </form>
           </div>
         </div>
-        <div class="modal-actions">
-          <button type="button" id="card-save-btn" class="btn-primary">Сохранить карту</button>
-          <button type="button" id="card-print-btn" class="btn-secondary">Печать</button>
-          <button type="button" id="card-cancel-btn" class="btn-secondary">Закрыть</button>
+        <div class="modal-actions card-modal-actions">
+          <div class="modal-actions-left">
+            <button type="button" id="card-create-group-btn" class="btn-secondary">Создать группу карт</button>
+          </div>
+          <div class="modal-actions-right">
+            <button type="button" id="card-save-btn" class="btn-primary">Сохранить карту</button>
+            <button type="button" id="card-print-btn" class="btn-secondary">Печать</button>
+            <button type="button" id="card-cancel-btn" class="btn-secondary">Закрыть</button>
+          </div>
         </div>
       </div>
     </div>
@@ -257,6 +262,29 @@
       </div>
       <div class="modal-actions">
         <button type="button" id="attachments-close" class="btn-secondary">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="group-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="group-modal-title">
+    <div class="modal-content group-modal-content">
+      <div class="modal-header">
+        <h3 id="group-modal-title">Создание группы карт</h3>
+      </div>
+      <div class="modal-body">
+        <div class="flex-col">
+          <label for="group-name">Наименование группы</label>
+          <input id="group-name" />
+        </div>
+        <div class="flex-col">
+          <label for="group-qty">Количество карт в группе</label>
+          <input id="group-qty" type="number" min="1" value="2" />
+        </div>
+        <p class="hint">Карты в группе будут созданны на основе данных текущего черновика.</p>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="group-create-confirm" class="btn-primary">Создать группу</button>
+        <button type="button" id="group-create-cancel" class="btn-secondary">Отмена</button>
       </div>
     </div>
   </div>
