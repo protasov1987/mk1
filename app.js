@@ -11,6 +11,7 @@ let archiveSearchTerm = '';
 let archiveStatusFilter = 'ALL';
 let apiOnline = false;
 const workorderOpenCards = new Set();
+const openGroupRows = new Set();
 let activeCardDraft = null;
 let activeCardOriginalId = null;
 let activeCardIsNew = false;
@@ -198,6 +199,22 @@ function renumberAutoCodesForCard(card) {
   });
 }
 
+function isGroupCard(card) {
+  return Boolean(card && card.isGroup);
+}
+
+function groupMarker() {
+  return '<span class="group-mark">(Г)</span> ';
+}
+
+function renderCardNameWithGroup(card) {
+  const base = escapeHtml(card && card.name ? card.name : '');
+  if (isGroupCard(card) || (card && card.parentGroupId)) {
+    return groupMarker() + base;
+  }
+  return base;
+}
+
 function normalizeOperationItems(card, op) {
   if (!op || !card) return;
   op.items = Array.isArray(op.items) ? op.items : [];
@@ -298,6 +315,7 @@ function formatLogValue(val) {
 }
 
 function recordCardLog(card, { action, object, field = null, targetId = null, oldValue = '', newValue = '' }) {
+  if (card && card.isGroup) return;
   if (!card) return;
   ensureCardMeta(card);
   card.logs.push({
@@ -564,6 +582,24 @@ function createRouteOpFromRefs(op, center, executor, plannedMinutes, order, opti
 }
 
 function recalcCardStatus(card) {
+  if (card && card.isGroup) {
+    const children = cards.filter(c => c.parentGroupId === card.id);
+    const statuses = children.map(c => c.status || 'NOT_STARTED');
+    const hasActive = statuses.some(st => st === 'IN_PROGRESS' || st === 'PAUSED');
+    const allDone = statuses.length > 0 && statuses.every(st => st === 'DONE');
+    const hasDone = statuses.some(st => st === 'DONE');
+    const hasNotStarted = statuses.some(st => st === 'NOT_STARTED' || !st);
+    if (hasActive) {
+      card.status = 'IN_PROGRESS';
+    } else if (hasDone && hasNotStarted) {
+      card.status = 'PAUSED';
+    } else if (allDone && !hasNotStarted) {
+      card.status = 'DONE';
+    } else {
+      card.status = 'NOT_STARTED';
+    }
+    return;
+  }
   const opsArr = card.operations || [];
   if (!opsArr.length) {
     card.status = 'NOT_STARTED';
@@ -592,6 +628,12 @@ function statusBadge(status) {
 }
 
 function cardStatusText(card) {
+  if (card && card.isGroup) {
+    if (card.status === 'IN_PROGRESS') return 'В работе';
+    if (card.status === 'PAUSED') return 'Пауза';
+    if (card.status === 'DONE') return 'Завершена';
+    return 'Не запущена';
+  }
   const opsArr = card.operations || [];
 
   const hasStartedOrDoneOrPaused = opsArr.some(o =>
@@ -882,7 +924,7 @@ async function loadData() {
 // === РЕНДЕРИНГ ДАШБОРДА ===
 function renderDashboard() {
   const statsContainer = document.getElementById('dashboard-stats');
-  const activeCards = cards.filter(c => !c.archived);
+  const activeCards = cards.filter(c => !c.archived && !c.isGroup);
   const cardsCount = activeCards.length;
   const inWork = activeCards.filter(c => c.status === 'IN_PROGRESS').length;
   const done = activeCards.filter(c => c.status === 'DONE').length;
@@ -972,7 +1014,7 @@ function renderDashboard() {
 
     html += '<tr>' +
       '<td>' + escapeHtml(card.barcode || '') + '</td>' +
-      '<td>' + escapeHtml(card.name) + '</td>' +
+      '<td>' + renderCardNameWithGroup(card) + '</td>' +
       '<td>' + escapeHtml(card.orderNo || '') + '</td>' +
       '<td><span class="dashboard-card-status" data-card-id="' + card.id + '">' + statusHtml + '</span></td>' +
       '<td>' + qtyCell + '</td>' +
@@ -1020,7 +1062,7 @@ function renderCardsTable() {
     const filesCount = (card.attachments || []).length;
     html += '<tr>' +
       '<td><button class="btn-link barcode-link" data-id="' + card.id + '">' + escapeHtml(card.barcode || '') + '</button></td>' +
-      '<td>' + escapeHtml(card.name) + '</td>' +
+      '<td>' + renderCardNameWithGroup(card) + '</td>' +
       '<td>' + escapeHtml(card.orderNo || '') + '</td>' +
       '<td>' + cardStatusText(card) + '</td>' +
       '<td>' + (card.operations ? card.operations.length : 0) + '</td>' +
@@ -1135,6 +1177,84 @@ function duplicateCard(cardId) {
   renderEverything();
 }
 
+function resetCardForGroup(templateCard, index, groupId, groupName) {
+  const base = cloneCard(templateCard);
+  base.id = genId('card');
+  base.parentGroupId = groupId;
+  base.groupName = groupName || base.groupName || '';
+  base.name = (index + 1) + '. ' + (templateCard.name || 'Карта');
+  base.barcode = generateUniqueEAN13();
+  base.status = 'NOT_STARTED';
+  base.archived = false;
+  base.logs = [];
+  base.initialSnapshot = null;
+  base.attachments = [];
+  base.operations = (base.operations || []).map((op, idx) => ({
+    ...op,
+    id: genId('rop'),
+    status: 'NOT_STARTED',
+    startedAt: null,
+    finishedAt: null,
+    elapsedSeconds: 0,
+    actualSeconds: null,
+    comment: '',
+    goodCount: 0,
+    scrapCount: 0,
+    holdCount: 0,
+    items: Array.isArray(op.items)
+      ? op.items.map(item => ({
+        ...item,
+        id: genId('item'),
+        goodCount: 0,
+        scrapCount: 0,
+        holdCount: 0
+      }))
+      : [],
+    order: typeof op.order === 'number' ? op.order : idx + 1
+  }));
+  recalcCardStatus(base);
+  ensureCardMeta(base);
+  if (!base.initialSnapshot) {
+    const snapshot = cloneCard(base);
+    snapshot.logs = [];
+    base.initialSnapshot = snapshot;
+  }
+  return base;
+}
+
+function createGroupFromTemplate(templateCard, count, groupName) {
+  const total = Math.max(1, parseInt(count, 10) || 1);
+  const baseTemplate = cloneCard(templateCard || createEmptyCardDraft());
+  const groupId = genId('group');
+  const groupCard = {
+    id: groupId,
+    barcode: generateUniqueEAN13(),
+    name: groupName || 'Группа карт',
+    isGroup: true,
+    status: 'NOT_STARTED',
+    archived: false,
+    createdAt: Date.now(),
+    attachments: [],
+    logs: [],
+    initialSnapshot: null,
+    operations: [],
+    orderNo: baseTemplate.orderNo || '',
+    contractNumber: baseTemplate.contractNumber || '',
+    desc: baseTemplate.desc || '',
+    groupSize: total
+  };
+
+  const childIds = [];
+  for (let i = 0; i < total; i++) {
+    const child = resetCardForGroup(baseTemplate, i, groupId, groupCard.name);
+    childIds.push(child.id);
+    cards.push(child);
+  }
+  groupCard.childCardIds = childIds;
+  cards.push(groupCard);
+  recalcCardStatus(groupCard);
+}
+
 function createEmptyCardDraft() {
   return {
     id: genId('card'),
@@ -1217,6 +1337,23 @@ function closeCardModal() {
   activeCardIsNew = false;
   routeQtyManual = false;
   focusCardsSection();
+}
+
+function openGroupModal() {
+  const modal = document.getElementById('group-modal');
+  if (!modal) return;
+  if (activeCardDraft) {
+    syncCardDraftFromForm();
+  }
+  modal.classList.remove('hidden');
+  const countInput = document.getElementById('group-count-input');
+  if (countInput) countInput.value = '2';
+}
+
+function closeGroupModal() {
+  const modal = document.getElementById('group-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
 }
 
 function saveCardDraft() {
@@ -2452,7 +2589,7 @@ function renderItemListRow(card, op, { readonly = false, colspan = 9, blankForPr
 
 function renderWorkordersTable({ collapseAll = false } = {}) {
   const wrapper = document.getElementById('workorders-table-wrapper');
-  const cardsWithOps = cards.filter(c => !c.archived && c.operations && c.operations.length);
+  const cardsWithOps = cards.filter(c => !c.archived && (c.isGroup || (c.operations && c.operations.length)));
   if (!cardsWithOps.length) {
     wrapper.innerHTML = '<p>Маршрутных операций пока нет.</p>';
     return;
@@ -2516,7 +2653,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       '<summary>' +
       '<div class="summary-line">' +
       '<div class="summary-text">' +
-      '<strong>' + escapeHtml(card.name || card.id) + '</strong>' +
+      '<strong>' + renderCardNameWithGroup(card) + '</strong>' +
       ' <span class="summary-sub">' +
       (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') + contractText +
       barcodeInline + filesButton + logButton +
@@ -2864,7 +3001,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
 
 function renderArchiveTable() {
   const wrapper = document.getElementById('archive-table-wrapper');
-  const archivedCards = cards.filter(c => c.archived && c.operations && c.operations.length);
+  const archivedCards = cards.filter(c => c.archived && (c.isGroup || (c.operations && c.operations.length)));
   if (!archivedCards.length) {
     wrapper.innerHTML = '<p>В архиве пока нет карт.</p>';
     return;
@@ -2915,7 +3052,7 @@ function renderArchiveTable() {
       '<summary>' +
       '<div class="summary-line">' +
       '<div class="summary-text">' +
-      '<strong>' + escapeHtml(card.name || card.id) + '</strong>' +
+      '<strong>' + renderCardNameWithGroup(card) + '</strong>' +
       ' <span class="summary-sub">' +
       (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') + contractText +
       barcodeInline + filesButton + logButton +
@@ -3440,6 +3577,48 @@ function setupAttachmentControls() {
   }
 }
 
+function setupGroupModal() {
+  const openBtn = document.getElementById('btn-new-group');
+  const modal = document.getElementById('group-modal');
+  const createBtn = document.getElementById('group-create-btn');
+  const cancelBtn = document.getElementById('group-cancel-btn');
+
+  if (openBtn) {
+    openBtn.addEventListener('click', () => {
+      openGroupModal();
+    });
+  }
+
+  if (modal) {
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        closeGroupModal();
+      }
+    });
+  }
+
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', () => closeGroupModal());
+  }
+
+  if (createBtn) {
+    createBtn.addEventListener('click', () => {
+      const countInput = document.getElementById('group-count-input');
+      const nameInput = document.getElementById('group-name-input');
+      const countVal = countInput ? parseInt(countInput.value, 10) : 1;
+      const groupName = nameInput ? nameInput.value.trim() : '';
+      if (activeCardDraft) {
+        syncCardDraftFromForm();
+      }
+      const template = activeCardDraft ? cloneCard(activeCardDraft) : createEmptyCardDraft();
+      createGroupFromTemplate(template, countVal, groupName);
+      saveData();
+      renderEverything();
+      closeGroupModal();
+    });
+  }
+}
+
 // === ИНИЦИАЛИЗАЦИЯ ===
 document.addEventListener('DOMContentLoaded', async () => {
   startRealtimeClock();
@@ -3449,6 +3628,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupForms();
   setupBarcodeModal();
   setupAttachmentControls();
+  setupGroupModal();
   setupLogModal();
   renderEverything();
   setInterval(tickTimers, 1000);
