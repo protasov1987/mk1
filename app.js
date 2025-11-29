@@ -1149,6 +1149,7 @@ function createEmptyCardDraft() {
 function openCardModal(cardId) {
   const modal = document.getElementById('card-modal');
   if (!modal) return;
+  focusCardsSection();
   activeCardOriginalId = cardId || null;
   if (cardId) {
     const card = cards.find(c => c.id === cardId);
@@ -1190,6 +1191,7 @@ function openCardModal(cardId) {
   renderRouteTableDraft();
   fillRouteSelectors();
   modal.classList.remove('hidden');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function closeCardModal() {
@@ -1203,6 +1205,7 @@ function closeCardModal() {
   activeCardOriginalId = null;
   activeCardIsNew = false;
   routeQtyManual = false;
+  focusCardsSection();
 }
 
 function saveCardDraft() {
@@ -3012,6 +3015,8 @@ function setupNavigation() {
       const target = btn.getAttribute('data-target');
       if (!target) return;
 
+      closeCardModal();
+
       document.querySelectorAll('main section').forEach(sec => {
         sec.classList.remove('active');
       });
@@ -3032,23 +3037,38 @@ function setupNavigation() {
   });
 }
 
+function setCardsTab(tabKey) {
+  const tabButtons = document.querySelectorAll('.subtab-btn[data-cards-tab]');
+  const listPanel = document.getElementById('cards-list-panel');
+  const directoryPanel = document.getElementById('cards-directory-panel');
+  tabButtons.forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-cards-tab') === tabKey);
+  });
+  if (listPanel) listPanel.classList.toggle('hidden', tabKey !== 'list');
+  if (directoryPanel) directoryPanel.classList.toggle('hidden', tabKey !== 'directory');
+}
+
 function setupCardsTabs() {
   const tabButtons = document.querySelectorAll('.subtab-btn[data-cards-tab]');
-  const panels = {
-    list: document.getElementById('cards-list-panel'),
-    directory: document.getElementById('cards-directory-panel')
-  };
 
   tabButtons.forEach(btn => {
     btn.addEventListener('click', () => {
       const target = btn.getAttribute('data-cards-tab');
-      tabButtons.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      Object.entries(panels).forEach(([key, panel]) => {
-        if (panel) panel.classList.toggle('hidden', key !== target);
-      });
+      setCardsTab(target);
     });
   });
+}
+
+function focusCardsSection() {
+  document.querySelectorAll('main section').forEach(sec => {
+    sec.classList.toggle('active', sec.id === 'cards');
+  });
+  const navButtons = document.querySelectorAll('.nav-btn');
+  navButtons.forEach(btn => {
+    const target = btn.getAttribute('data-target');
+    btn.classList.toggle('active', target === 'cards');
+  });
+  setCardsTab('list');
 }
 
 // === ФОРМЫ ===
