@@ -811,6 +811,28 @@ footer {
   align-items: center;
 }
 
+.group-card summary {
+  background: #f8f5ff;
+}
+
+.group-children {
+  padding: 8px 12px 12px;
+  background: #f9fafb;
+}
+
+.group-child {
+  margin: 8px 0;
+}
+
+.group-child summary {
+  padding-left: 16px;
+}
+
+.muted {
+  color: #6b7280;
+  font-size: 12px;
+}
+
 .status-pill { 
   display: inline-flex;
   align-items: center;
