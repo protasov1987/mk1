@@ -6,6 +6,7 @@ let ops = [];
 let centers = [];
 let workorderSearchTerm = '';
 let workorderStatusFilter = 'ALL';
+let workorderMissingExecutorFilter = 'ALL';
 let archiveSearchTerm = '';
 let archiveStatusFilter = 'ALL';
 let apiOnline = false;
@@ -490,8 +491,11 @@ function recalcCardStatus(card) {
   const hasActive = opsArr.some(o => o.status === 'IN_PROGRESS' || o.status === 'PAUSED');
   const allDone = opsArr.length > 0 && opsArr.every(o => o.status === 'DONE');
   const hasNotStarted = opsArr.some(o => o.status === 'NOT_STARTED' || !o.status);
+  const hasDone = opsArr.some(o => o.status === 'DONE');
   if (hasActive) {
     card.status = 'IN_PROGRESS';
+  } else if (hasDone && hasNotStarted) {
+    card.status = 'PAUSED';
   } else if (allDone && !hasNotStarted) {
     card.status = 'DONE';
   } else {
@@ -533,6 +537,12 @@ function cardStatusText(card) {
     return 'Завершена';
   }
 
+  const hasDone = opsArr.some(o => o.status === 'DONE');
+  const hasNotStarted = opsArr.some(o => o.status === 'NOT_STARTED' || !o.status);
+  if (hasDone && hasNotStarted) {
+    return 'Пауза';
+  }
+
   const notStartedOps = opsArr.filter(o => o.status === 'NOT_STARTED' || !o.status);
   if (notStartedOps.length) {
     let next = notStartedOps[0];
@@ -554,14 +564,27 @@ function getCardProcessState(card) {
   const allDone = opsArr.length > 0 && opsArr.every(o => o.status === 'DONE');
   const allNotStarted = opsArr.length > 0 && opsArr.every(o => o.status === 'NOT_STARTED' || !o.status);
   const hasAnyDone = opsArr.some(o => o.status === 'DONE');
+  const hasNotStarted = opsArr.some(o => o.status === 'NOT_STARTED' || !o.status);
 
   if (allDone) return { key: 'DONE', label: 'Выполнено', className: 'done' };
   if (hasInProgress && hasPaused) return { key: 'MIXED', label: 'Смешанно', className: 'mixed' };
   if (hasInProgress) return { key: 'IN_PROGRESS', label: 'Выполняется', className: 'in-progress' };
   if (hasPaused) return { key: 'PAUSED', label: 'Пауза', className: 'paused' };
+  if (hasAnyDone && hasNotStarted) return { key: 'PAUSED', label: 'Пауза', className: 'paused' };
   if (allNotStarted) return { key: 'NOT_STARTED', label: 'Не запущена', className: 'not-started' };
   if (hasAnyDone) return { key: 'IN_PROGRESS', label: 'Выполняется', className: 'in-progress' };
   return { key: 'NOT_STARTED', label: 'Не запущена', className: 'not-started' };
+}
+
+function cardHasMissingExecutors(card) {
+  const opsArr = card.operations || [];
+  return opsArr.some(op => {
+    const mainMissing = !op.executor || !String(op.executor).trim();
+    const additionalMissing = Array.isArray(op.additionalExecutors)
+      ? op.additionalExecutors.some(ex => !ex || !String(ex).trim())
+      : false;
+    return mainMissing || additionalMissing;
+  });
 }
 
 function renderCardStateBadge(card) {
@@ -2277,12 +2300,16 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
     return workorderStatusFilter === 'ALL' || state.key === workorderStatusFilter;
   });
 
-  if (!filteredByStatus.length) {
+  const filteredByMissingExecutor = workorderMissingExecutorFilter === 'NO_EXECUTOR'
+    ? filteredByStatus.filter(card => cardHasMissingExecutors(card))
+    : filteredByStatus;
+
+  if (!filteredByMissingExecutor.length) {
     wrapper.innerHTML = '<p>Нет карт, подходящих под выбранный фильтр.</p>';
     return;
   }
 
-  let sortedCards = [...filteredByStatus];
+  let sortedCards = [...filteredByMissingExecutor];
   if (termRaw) {
     sortedCards.sort((a, b) => cardSearchScore(b, termRaw) - cardSearchScore(a, termRaw));
   }
@@ -2304,6 +2331,9 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
   filteredByContract.forEach(card => {
     const opened = !collapseAll && workorderOpenCards.has(card.id);
     const stateBadge = renderCardStateBadge(card);
+    const missingBadge = cardHasMissingExecutors(card)
+      ? '<span class="status-pill status-pill-missing-executor" title="Есть операции без исполнителя">Нет исполнителя</span>'
+      : '';
     const canArchive = card.status === 'DONE';
     const filesCount = (card.attachments || []).length;
     const barcodeInline = card.barcode
@@ -2324,7 +2354,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       '</span>' +
       '</div>' +
       '<div class="summary-actions">' +
-      ' ' + stateBadge +
+      (missingBadge ? missingBadge + ' ' : '') + stateBadge +
       (canArchive ? ' <button type="button" class="btn-small btn-secondary archive-move-btn" data-card-id="' + card.id + '">Перенести в архив</button>' : '') +
       '</div>' +
       '</div>' +
@@ -3003,6 +3033,7 @@ function setupForms() {
   const searchClearBtn = document.getElementById('workorder-search-clear');
   const statusSelect = document.getElementById('workorder-status');
   const contractInput = document.getElementById('workorder-contract');
+  const missingExecutorSelect = document.getElementById('workorder-missing-executor');
   if (searchInput) {
     searchInput.addEventListener('input', e => {
       workorderSearchTerm = e.target.value || '';
@@ -3023,6 +3054,8 @@ function setupForms() {
       if (contractInput) contractInput.value = '';
       if (statusSelect) statusSelect.value = 'ALL';
       workorderStatusFilter = 'ALL';
+      workorderMissingExecutorFilter = 'ALL';
+      if (missingExecutorSelect) missingExecutorSelect.value = 'ALL';
       renderWorkordersTable({ collapseAll: true });
     });
   }
@@ -3030,6 +3063,13 @@ function setupForms() {
   if (statusSelect) {
     statusSelect.addEventListener('change', e => {
       workorderStatusFilter = e.target.value || 'ALL';
+      renderWorkordersTable({ collapseAll: true });
+    });
+  }
+
+  if (missingExecutorSelect) {
+    missingExecutorSelect.addEventListener('change', e => {
+      workorderMissingExecutorFilter = e.target.value || 'ALL';
       renderWorkordersTable({ collapseAll: true });
     });
   }

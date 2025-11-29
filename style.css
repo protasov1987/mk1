@@ -711,7 +711,7 @@ footer {
   align-items: center;
 }
 
-.status-pill {
+.status-pill { 
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -721,6 +721,12 @@ footer {
   font-weight: 600;
   line-height: 1;
   border: 1px solid transparent;
+}
+
+.status-pill-missing-executor {
+  background: #fef9c3;
+  color: #92400e;
+  border-color: #facc15;
 }
 
 .status-pill-not-started {
