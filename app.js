@@ -13,9 +13,12 @@ const workorderOpenCards = new Set();
 let activeCardDraft = null;
 let activeCardOriginalId = null;
 let activeCardIsNew = false;
-let routeOpCodeFilter = '';
 let cardsSearchTerm = '';
+let cardsContractTerm = '';
+let workorderContractTerm = '';
+let archiveContractTerm = '';
 let attachmentContext = null;
+let routeQtyManual = false;
 const ATTACH_ACCEPT = '.pdf,.doc,.docx,.jpg,.jpeg,.png,.zip,.rar,.7z';
 const ATTACH_MAX_SIZE = 15 * 1024 * 1024; // 15 MB
 let logContextCardId = null;
@@ -140,6 +143,34 @@ function toSafeCount(val) {
   return num;
 }
 
+function formatStepCode(step) {
+  return String(step * 5).padStart(3, '0');
+}
+
+function getOperationQuantity(op, card) {
+  if (op && (op.quantity || op.quantity === 0)) {
+    const q = toSafeCount(op.quantity);
+    return Number.isFinite(q) ? q : '';
+  }
+  if (card && (card.quantity || card.quantity === 0)) {
+    const q = toSafeCount(card.quantity);
+    return Number.isFinite(q) ? q : '';
+  }
+  return '';
+}
+
+function renumberAutoCodesForCard(card) {
+  if (!card || !Array.isArray(card.operations)) return;
+  const opsSorted = [...card.operations].sort((a, b) => (a.order || 0) - (b.order || 0));
+  let autoIndex = 0;
+  opsSorted.forEach(op => {
+    if (op.autoCode) {
+      autoIndex++;
+      op.opCode = formatStepCode(autoIndex);
+    }
+  });
+}
+
 function ensureAttachments(card) {
   if (!card) return;
   if (!Array.isArray(card.attachments)) card.attachments = [];
@@ -159,6 +190,7 @@ function ensureCardMeta(card, options = {}) {
   if (card.quantity == null) card.quantity = '';
   if (typeof card.drawing !== 'string') card.drawing = card.drawing ? String(card.drawing) : '';
   if (typeof card.material !== 'string') card.material = card.material ? String(card.material) : '';
+  if (typeof card.contractNumber !== 'string') card.contractNumber = card.contractNumber ? String(card.contractNumber) : '';
   if (typeof card.createdAt !== 'number') {
     card.createdAt = Date.now();
   }
@@ -175,7 +207,13 @@ function ensureCardMeta(card, options = {}) {
     op.goodCount = toSafeCount(op.goodCount || 0);
     op.scrapCount = toSafeCount(op.scrapCount || 0);
     op.holdCount = toSafeCount(op.holdCount || 0);
+    op.quantity = getOperationQuantity(op, card);
+    op.autoCode = Boolean(op.autoCode);
+    op.additionalExecutors = Array.isArray(op.additionalExecutors)
+      ? op.additionalExecutors.map(name => (name || '').toString()).slice(0, 2)
+      : [];
   });
+  renumberAutoCodesForCard(card);
 }
 
 function formatLogValue(val) {
@@ -412,16 +450,22 @@ function setupBarcodeModal() {
 }
 
 // === МОДЕЛЬ ОПЕРАЦИИ МАРШРУТА ===
-function createRouteOpFromRefs(op, center, executor, plannedMinutes, order) {
+function createRouteOpFromRefs(op, center, executor, plannedMinutes, order, options = {}) {
+  const { code, autoCode = false, quantity } = options;
   return {
     id: genId('rop'),
     opId: op.id,
-    opCode: op.code || op.opCode || generateUniqueOpCode(collectUsedOpCodes()),
+    opCode: code || op.code || op.opCode || generateUniqueOpCode(collectUsedOpCodes()),
     opName: op.name,
     centerId: center.id,
     centerName: center.name,
     executor: executor || '',
     plannedMinutes: plannedMinutes || op.recTime || 30,
+    quantity: quantity === '' || quantity == null ? '' : toSafeCount(quantity),
+    autoCode,
+    additionalExecutors: Array.isArray(op.additionalExecutors)
+      ? op.additionalExecutors.slice(0, 2)
+      : [],
     status: 'NOT_STARTED',
     firstStartedAt: null,
     startedAt: null,
@@ -755,9 +799,9 @@ function renderDashboard() {
   });
 
   const dashTableWrapper = document.getElementById('dashboard-cards');
-  const eligibleCards = activeCards.filter(card => card.status !== 'DONE' && (card.operations || []).some(o => o.status && o.status !== 'NOT_STARTED'));
+  const eligibleCards = activeCards;
   if (!eligibleCards.length) {
-    dashTableWrapper.innerHTML = '<p>Ещё нет незавершённых карт с выполненными операциями.</p>';
+    dashTableWrapper.innerHTML = '<p>Карт для отображения пока нет.</p>';
     return;
   }
 
@@ -847,13 +891,18 @@ function renderCardsTable() {
   }
 
   const termRaw = cardsSearchTerm.trim();
+  const contractTerm = cardsContractTerm.trim().toLowerCase();
   let sortedCards = [...visibleCards];
   if (termRaw) {
     sortedCards.sort((a, b) => cardSearchScore(b, termRaw) - cardSearchScore(a, termRaw));
   }
-  const filteredCards = termRaw
-    ? sortedCards.filter(card => cardSearchScore(card, termRaw) > 0)
-    : sortedCards;
+  const filteredCards = sortedCards.filter(card => {
+    const matchesContract = contractTerm
+      ? (card.contractNumber || '').toLowerCase().includes(contractTerm)
+      : true;
+    const matchesSearch = termRaw ? cardSearchScore(card, termRaw) > 0 : true;
+    return matchesContract && matchesSearch;
+  });
 
   if (!filteredCards.length) {
     wrapper.innerHTML = '<p>Карты по запросу не найдены.</p>';
@@ -980,6 +1029,7 @@ function createEmptyCardDraft() {
     quantity: '',
     drawing: '',
     material: '',
+    contractNumber: '',
     orderNo: '',
     desc: '',
     status: 'NOT_STARTED',
@@ -1013,17 +1063,22 @@ function openCardModal(cardId) {
   document.getElementById('card-order').value = activeCardDraft.orderNo || '';
   document.getElementById('card-drawing').value = activeCardDraft.drawing || '';
   document.getElementById('card-material').value = activeCardDraft.material || '';
+  document.getElementById('card-contract').value = activeCardDraft.contractNumber || '';
   document.getElementById('card-desc').value = activeCardDraft.desc || '';
   document.getElementById('card-status-text').textContent = cardStatusText(activeCardDraft);
   const attachBtn = document.getElementById('card-attachments-btn');
   if (attachBtn) {
     attachBtn.innerHTML = '📎 Файлы (' + (activeCardDraft.attachments ? activeCardDraft.attachments.length : 0) + ')';
   }
-  routeOpCodeFilter = '';
-  const routeFilterInput = document.getElementById('route-op-code-filter');
-  if (routeFilterInput) {
-    routeFilterInput.value = '';
-  }
+  const routeCodeInput = document.getElementById('route-op-code');
+  if (routeCodeInput) routeCodeInput.value = '';
+  const routeOpInput = document.getElementById('route-op');
+  if (routeOpInput) routeOpInput.value = '';
+  const routeCenterInput = document.getElementById('route-center');
+  if (routeCenterInput) routeCenterInput.value = '';
+  const routeQtyInput = document.getElementById('route-qty');
+  routeQtyManual = false;
+  if (routeQtyInput) routeQtyInput.value = activeCardDraft.quantity !== '' ? activeCardDraft.quantity : '';
   renderRouteTableDraft();
   fillRouteSelectors();
   modal.classList.remove('hidden');
@@ -1039,6 +1094,7 @@ function closeCardModal() {
   activeCardDraft = null;
   activeCardOriginalId = null;
   activeCardIsNew = false;
+  routeQtyManual = false;
 }
 
 function saveCardDraft() {
@@ -1049,8 +1105,12 @@ function saveCardDraft() {
     order: typeof op.order === 'number' ? op.order : idx + 1,
     goodCount: toSafeCount(op.goodCount || 0),
     scrapCount: toSafeCount(op.scrapCount || 0),
-    holdCount: toSafeCount(op.holdCount || 0)
+    holdCount: toSafeCount(op.holdCount || 0),
+    quantity: getOperationQuantity(op, draft),
+    autoCode: Boolean(op.autoCode),
+    additionalExecutors: Array.isArray(op.additionalExecutors) ? op.additionalExecutors.slice(0, 2) : []
   }));
+  renumberAutoCodesForCard(draft);
   recalcCardStatus(draft);
 
   if (activeCardIsNew || activeCardOriginalId == null) {
@@ -1089,13 +1149,14 @@ function syncCardDraftFromForm() {
   activeCardDraft.orderNo = document.getElementById('card-order').value.trim();
   activeCardDraft.drawing = document.getElementById('card-drawing').value.trim();
   activeCardDraft.material = document.getElementById('card-material').value.trim();
+  activeCardDraft.contractNumber = document.getElementById('card-contract').value.trim();
   activeCardDraft.desc = document.getElementById('card-desc').value.trim();
 }
 
 function logCardDifferences(original, updated) {
   if (!original || !updated) return;
   const cardRef = updated;
-  const fields = ['name', 'orderNo', 'desc', 'quantity', 'drawing', 'material'];
+  const fields = ['name', 'orderNo', 'desc', 'quantity', 'drawing', 'material', 'contractNumber'];
   fields.forEach(field => {
     if ((original[field] || '') !== (updated[field] || '')) {
       recordCardLog(cardRef, { action: 'Изменение поля', object: 'Карта', field, oldValue: original[field] || '', newValue: updated[field] || '' });
@@ -1177,17 +1238,14 @@ function renderAttachmentsModal() {
     let html = '<table class="attachments-table"><thead><tr><th>Имя файла</th><th>Размер</th><th>Дата</th><th>Действия</th></tr></thead><tbody>';
     files.forEach(file => {
       const date = new Date(file.createdAt || Date.now()).toLocaleString();
-      const downloadAttr = attachmentContext.source === 'live'
-        ? 'href="/files/' + file.id + '" target="_blank" rel="noopener"'
-        : '';
       html += '<tr>' +
         '<td>' + escapeHtml(file.name || 'файл') + '</td>' +
         '<td>' + escapeHtml(formatBytes(file.size)) + '</td>' +
         '<td>' + escapeHtml(date) + '</td>' +
         '<td><div class="table-actions">' +
-        (attachmentContext.source === 'live'
-          ? '<a class="btn-small" ' + downloadAttr + '>Скачать</a>'
-          : '<button class="btn-small" data-download-id="' + file.id + '">Скачать</button>') +
+        '<button class="btn-small" data-preview-id="' + file.id + '">Открыть</button>' +
+        '<button class="btn-small" data-download-id="' + file.id + '">Скачать</button>' +
+        '<button class="btn-small btn-danger" data-delete-id="' + file.id + '">Удалить</button>' +
         '</div></td>' +
         '</tr>';
     });
@@ -1196,23 +1254,81 @@ function renderAttachmentsModal() {
   }
   uploadHint.textContent = 'Допустимые форматы: pdf, doc, jpg, архив. Максимум ' + formatBytes(ATTACH_MAX_SIZE) + '.';
 
-  if (attachmentContext.source !== 'live') {
-    list.querySelectorAll('button[data-download-id]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const id = btn.getAttribute('data-download-id');
-        const cardRef = getAttachmentTargetCard();
-        if (!cardRef) return;
-        const file = (cardRef.attachments || []).find(f => f.id === id);
-        if (!file || !file.content) return;
-        const blob = dataUrlToBlob(file.content, file.type);
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = file.name || 'file';
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(link.href), 5000);
-      });
+  list.querySelectorAll('button[data-preview-id]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-preview-id');
+      const cardRef = getAttachmentTargetCard();
+      if (!cardRef) return;
+      const file = (cardRef.attachments || []).find(f => f.id === id);
+      if (!file) return;
+      previewAttachment(file);
     });
+  });
+
+  list.querySelectorAll('button[data-download-id]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-download-id');
+      const cardRef = getAttachmentTargetCard();
+      if (!cardRef) return;
+      const file = (cardRef.attachments || []).find(f => f.id === id);
+      if (!file) return;
+      downloadAttachment(file);
+    });
+  });
+
+  list.querySelectorAll('button[data-delete-id]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-delete-id');
+      deleteAttachment(id);
+    });
+  });
+}
+
+function downloadAttachment(file) {
+  if (!file) return;
+  if (file.content) {
+    const blob = dataUrlToBlob(file.content, file.type);
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = file.name || 'file';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 5000);
+    return;
   }
+  if (file.id) {
+    window.open('/files/' + file.id, '_blank', 'noopener');
+  }
+}
+
+function previewAttachment(file) {
+  if (!file) return;
+  if (file.content) {
+    const blob = dataUrlToBlob(file.content, file.type);
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener');
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    return;
+  }
+  if (file.id) {
+    window.open('/files/' + file.id, '_blank', 'noopener');
+  }
+}
+
+async function deleteAttachment(fileId) {
+  const card = getAttachmentTargetCard();
+  if (!card) return;
+  ensureAttachments(card);
+  const before = card.attachments.length;
+  const idx = card.attachments.findIndex(f => f.id === fileId);
+  if (idx < 0) return;
+  card.attachments.splice(idx, 1);
+  recordCardLog(card, { action: 'Файлы', object: 'Карта', field: 'attachments', oldValue: before, newValue: card.attachments.length });
+  if (attachmentContext && attachmentContext.source === 'live') {
+    await saveData();
+    renderEverything();
+  }
+  renderAttachmentsModal();
+  updateAttachmentCounters(card.id);
 }
 
 async function addAttachmentsFromFiles(fileList) {
@@ -1330,6 +1446,60 @@ function buildExecutorHistory(card, op) {
   return chain.filter(Boolean).join(' → ');
 }
 
+function buildAdditionalExecutorsHistory(card, op) {
+  const entries = (card.logs || [])
+    .filter(entry => entry.targetId === op.id && entry.field === 'additionalExecutors')
+    .sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  const lines = [];
+  const seen = new Set();
+
+  entries.forEach(entry => {
+    const oldVal = (entry.oldValue || '').trim();
+    const newVal = (entry.newValue || '').trim();
+    const isCountChange = /^\d+$/.test(newVal) && (!oldVal || /^\d+$/.test(oldVal));
+    if (isCountChange) return;
+
+    if (oldVal && newVal && newVal !== oldVal && newVal !== 'удален') {
+      lines.push(escapeHtml(oldVal) + ' → ' + escapeHtml(newVal));
+      seen.add(oldVal);
+      seen.add(newVal);
+    } else if (!oldVal && newVal && newVal !== 'удален') {
+      lines.push(escapeHtml(newVal));
+      seen.add(newVal);
+    } else if (oldVal && (!newVal || newVal === 'удален')) {
+      lines.push(escapeHtml(oldVal) + ' (удален)');
+      seen.add(oldVal);
+    }
+  });
+
+  const currentExtras = Array.isArray(op.additionalExecutors) ? op.additionalExecutors : [];
+  currentExtras.forEach(name => {
+    const clean = (name || '').trim();
+    if (!clean || seen.has(clean)) return;
+    lines.push(escapeHtml(clean));
+    seen.add(clean);
+  });
+
+  return lines.filter(Boolean);
+}
+
+function buildExecutorHistoryCell(card, op) {
+  const mainHistory = buildExecutorHistory(card, op) || '';
+  const extraHistory = buildAdditionalExecutorsHistory(card, op);
+  if (!mainHistory && !extraHistory.length) return '';
+
+  let html = '';
+  if (mainHistory) {
+    html += '<div class="executor-history-main">' + escapeHtml(mainHistory) + '</div>';
+  }
+  if (extraHistory.length) {
+    html += '<div class="executor-history-extras">' +
+      extraHistory.map(line => '<div class="executor-history-line">' + line + '</div>').join('') +
+      '</div>';
+  }
+  return html;
+}
+
 function buildSummaryTable(card) {
   const opsSorted = [...(card.operations || [])].sort((a, b) => (a.order || 0) - (b.order || 0));
   if (!opsSorted.length) return '<p>Маршрут пока пуст.</p>';
@@ -1350,7 +1520,7 @@ function buildSummaryTable(card) {
       timeCell = formatSecondsToHMS(seconds);
     }
 
-    const executorHistory = buildExecutorHistory(card, op) || op.executor || '';
+    const executorCell = buildExecutorHistoryCell(card, op) || escapeHtml(op.executor || '');
     const startEndCell = formatStartEnd(op);
 
     html += '<tr data-row-id="' + rowId + '">' +
@@ -1358,7 +1528,7 @@ function buildSummaryTable(card) {
       '<td>' + escapeHtml(op.centerName) + '</td>' +
       '<td>' + escapeHtml(op.opCode || '') + '</td>' +
       '<td>' + renderOpName(op) + '</td>' +
-      '<td>' + escapeHtml(executorHistory) + '</td>' +
+      '<td>' + executorCell + '</td>' +
       '<td>' + (op.plannedMinutes || '') + '</td>' +
       '<td>' + statusBadge(op.status) + '</td>' +
       '<td>' + startEndCell + '</td>' +
@@ -1381,14 +1551,14 @@ function buildInitialSummaryTable(card) {
     '</tr></thead><tbody>';
 
   opsSorted.forEach((op, idx) => {
-    const executorHistory = buildExecutorHistory(card, op) || op.executor || '';
+    const executorCell = buildExecutorHistoryCell(card, op) || escapeHtml(op.executor || '');
 
     html += '<tr>' +
       '<td>' + (idx + 1) + '</td>' +
       '<td>' + escapeHtml(op.centerName) + '</td>' +
       '<td>' + escapeHtml(op.opCode || '') + '</td>' +
       '<td>' + renderOpName(op) + '</td>' +
-      '<td>' + escapeHtml(executorHistory) + '</td>' +
+      '<td>' + executorCell + '</td>' +
       '<td>' + (op.plannedMinutes || '') + '</td>' +
       '</tr>';
   });
@@ -1644,6 +1814,7 @@ function renderRouteTableDraft() {
   const wrapper = document.getElementById('route-table-wrapper');
   if (!wrapper || !activeCardDraft) return;
   const opsArr = activeCardDraft.operations || [];
+  renumberAutoCodesForCard(activeCardDraft);
   if (!opsArr.length) {
     wrapper.innerHTML = '<p>Маршрут пока пуст. Добавьте операции ниже.</p>';
     document.getElementById('card-status-text').textContent = cardStatusText(activeCardDraft);
@@ -1651,15 +1822,15 @@ function renderRouteTableDraft() {
   }
   const sortedOps = [...opsArr].sort((a, b) => (a.order || 0) - (b.order || 0));
   let html = '<table><thead><tr>' +
-    '<th>Порядок</th><th>Участок</th><th>Код операции</th><th>Операция</th><th>Исполнитель</th><th>План (мин)</th><th>Статус</th><th>Действия</th>' +
+    '<th>Порядок</th><th>Участок</th><th>Код операции</th><th>Операция</th><th>Кол-во изделий</th><th>План (мин)</th><th>Статус</th><th>Действия</th>' +
     '</tr></thead><tbody>';
   sortedOps.forEach((o, index) => {
     html += '<tr data-rop-id="' + o.id + '">' +
       '<td>' + (index + 1) + '</td>' +
       '<td>' + escapeHtml(o.centerName) + '</td>' +
-      '<td>' + escapeHtml(o.opCode || '') + '</td>' +
+      '<td><input class="route-code-input" data-rop-id="' + o.id + '" value="' + escapeHtml(o.opCode || '') + '" /></td>' +
       '<td>' + renderOpName(o) + '</td>' +
-      '<td><input class="executor-input" data-rop-id="' + o.id + '" value="' + escapeHtml(o.executor || '') + '" placeholder="ФИО" /></td>' +
+      '<td><input type="number" min="0" class="route-qty-input" data-rop-id="' + o.id + '" value="' + escapeHtml(getOperationQuantity(o, activeCardDraft)) + '"></td>' +
       '<td>' + (o.plannedMinutes || '') + '</td>' +
       '<td>' + statusBadge(o.status) + '</td>' +
       '<td><div class="table-actions">' +
@@ -1680,6 +1851,7 @@ function renderRouteTableDraft() {
         if (!activeCardDraft) return;
         if (action === 'delete') {
           activeCardDraft.operations = activeCardDraft.operations.filter(o => o.id !== ropId);
+          renumberAutoCodesForCard(activeCardDraft);
         } else if (action === 'move-up' || action === 'move-down') {
           moveRouteOpInDraft(ropId, action === 'move-up' ? -1 : 1);
         }
@@ -1689,14 +1861,48 @@ function renderRouteTableDraft() {
     });
   });
 
-  wrapper.querySelectorAll('.executor-input').forEach(input => {
-    input.addEventListener('input', e => {
+  wrapper.querySelectorAll('.route-code-input').forEach(input => {
+    input.addEventListener('blur', e => {
+      if (!activeCardDraft) return;
       const ropId = input.getAttribute('data-rop-id');
-      const value = (e.target.value || '').trim();
       const op = activeCardDraft.operations.find(o => o.id === ropId);
       if (!op) return;
-      op.executor = value;
-      document.getElementById('card-status-text').textContent = cardStatusText(activeCardDraft);
+      const prev = op.opCode || '';
+      const value = (e.target.value || '').trim();
+      if (!value) {
+        op.autoCode = true;
+      } else {
+        op.autoCode = false;
+        op.opCode = value;
+      }
+      renumberAutoCodesForCard(activeCardDraft);
+      if (prev !== op.opCode && !activeCardIsNew) {
+        recordCardLog(activeCardDraft, { action: 'Код операции', object: opLogLabel(op), field: 'opCode', targetId: op.id, oldValue: prev, newValue: op.opCode });
+      }
+      renderRouteTableDraft();
+    });
+  });
+
+  wrapper.querySelectorAll('.route-qty-input').forEach(input => {
+    input.addEventListener('input', e => {
+      e.target.value = toSafeCount(e.target.value);
+    });
+    input.addEventListener('blur', e => {
+      if (!activeCardDraft) return;
+      const ropId = input.getAttribute('data-rop-id');
+      const op = activeCardDraft.operations.find(o => o.id === ropId);
+      if (!op) return;
+      const prev = getOperationQuantity(op, activeCardDraft);
+      const raw = e.target.value;
+      if (raw === '') {
+        op.quantity = '';
+      } else {
+        op.quantity = toSafeCount(raw);
+      }
+      if (prev !== op.quantity && !activeCardIsNew) {
+        recordCardLog(activeCardDraft, { action: 'Количество изделий', object: opLogLabel(op), field: 'operationQuantity', targetId: op.id, oldValue: prev, newValue: op.quantity });
+      }
+      renderRouteTableDraft();
     });
   });
 }
@@ -1712,32 +1918,46 @@ function moveRouteOpInDraft(ropId, delta) {
   opsArr[idx].order = opsArr[newIdx].order;
   opsArr[newIdx].order = tmpOrder;
   activeCardDraft.operations = opsArr;
+  renumberAutoCodesForCard(activeCardDraft);
 }
 
 function fillRouteSelectors() {
-  const opSelect = document.getElementById('route-op');
-  const centerSelect = document.getElementById('route-center');
-  opSelect.innerHTML = '';
-  centerSelect.innerHTML = '';
-  const current = opSelect.value;
-  const filter = (routeOpCodeFilter || '').toLowerCase();
-  const filteredOps = filter
-    ? ops.filter(o => (o.code || '').toLowerCase().includes(filter))
-    : ops;
+  const opInput = document.getElementById('route-op');
+  const centerInput = document.getElementById('route-center');
+  const opList = document.getElementById('route-op-options');
+  const centerList = document.getElementById('route-center-options');
+  if (!opList || !centerList) return;
+
+  const opFilter = (opInput ? opInput.value : '').toLowerCase();
+  const centerFilter = (centerInput ? centerInput.value : '').toLowerCase();
+
+  const filteredOps = ops.filter(o => {
+    if (!opFilter) return true;
+    const label = formatOpLabel(o).toLowerCase();
+    const desc = (o.desc || '').toLowerCase();
+    return label.includes(opFilter) || desc.includes(opFilter);
+  });
+  const filteredCenters = centers.filter(c => {
+    if (!centerFilter) return true;
+    const name = (c.name || '').toLowerCase();
+    const desc = (c.desc || '').toLowerCase();
+    return name.includes(centerFilter) || desc.includes(centerFilter);
+  });
+
+  opList.innerHTML = '';
   filteredOps.forEach(o => {
     const opt = document.createElement('option');
-    opt.value = o.id;
-    opt.textContent = formatOpLabel(o);
-    opSelect.appendChild(opt);
+    opt.value = formatOpLabel(o);
+    opt.dataset.id = o.id;
+    opList.appendChild(opt);
   });
-  if (current) {
-    opSelect.value = current;
-  }
-  centers.forEach(c => {
+
+  centerList.innerHTML = '';
+  filteredCenters.forEach(c => {
     const opt = document.createElement('option');
-    opt.value = c.id;
-    opt.textContent = c.name;
-    centerSelect.appendChild(opt);
+    opt.value = c.name;
+    opt.dataset.id = c.id;
+    centerList.appendChild(opt);
   });
 }
 
@@ -1824,13 +2044,50 @@ function cardSearchScore(card, term) {
   }
   if (card.name && card.name.toLowerCase().includes(t)) score += 50;
   if (card.orderNo && card.orderNo.toLowerCase().includes(t)) score += 50;
+  if (card.contractNumber && card.contractNumber.toLowerCase().includes(t)) score += 50;
   return score;
 }
 
-function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = false } = {}) {
+function renderExecutorCell(op, card, { readonly = false } = {}) {
+  const extras = Array.isArray(op.additionalExecutors) ? op.additionalExecutors : [];
+  if (readonly) {
+    const extrasText = extras.filter(Boolean).length
+      ? '<div class="additional-executor-list">' + extras.map(name => '<span class="executor-chip">' + escapeHtml(name) + '</span>').join('') + '</div>'
+      : '';
+    return '<div class="executor-cell readonly">' +
+      '<div class="executor-name">' + escapeHtml(op.executor || '') + '</div>' +
+      extrasText +
+      '</div>';
+  }
+
+  const cardId = card ? card.id : '';
+  let html = '<div class="executor-cell" data-card-id="' + cardId + '" data-op-id="' + op.id + '">';
+  html += '<div class="executor-row primary">' +
+    '<input type="text" class="executor-main-input" data-card-id="' + cardId + '" data-op-id="' + op.id + '" value="' + escapeHtml(op.executor || '') + '" placeholder="Исполнитель" />' +
+    (extras.length < 2 ? '<button type="button" class="icon-btn add-executor-btn" data-card-id="' + cardId + '" data-op-id="' + op.id + '">+</button>' : '') +
+    '</div>';
+
+  extras.forEach((name, idx) => {
+    const canAddMore = extras.length < 2 && idx === extras.length - 1;
+    html += '<div class="executor-row extra" data-extra-index="' + idx + '">' +
+      '<input type="text" class="additional-executor-input" data-card-id="' + cardId + '" data-op-id="' + op.id + '" data-extra-index="' + idx + '" value="' + escapeHtml(name || '') + '" placeholder="Доп. исполнитель" />' +
+      (canAddMore ? '<button type="button" class="icon-btn add-executor-btn" data-card-id="' + cardId + '" data-op-id="' + op.id + '">+</button>' : '') +
+      '<button type="button" class="icon-btn remove-executor-btn" data-card-id="' + cardId + '" data-op-id="' + op.id + '" data-extra-index="' + idx + '">-</button>' +
+      '</div>';
+  });
+
+  html += '</div>';
+  return html;
+}
+
+function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = false, showQuantityColumn = true } = {}) {
   const opsSorted = [...(card.operations || [])].sort((a, b) => (a.order || 0) - (b.order || 0));
+  const baseColumns = readonly ? 9 : 10;
+  const totalColumns = baseColumns + (showQuantityColumn ? 1 : 0);
   let html = '<table><thead><tr>' +
-    '<th>Порядок</th><th>Участок</th><th>Код операции</th><th>Операция</th><th>Исполнитель</th><th>План (мин)</th><th>Статус</th><th>Текущее / факт. время</th>' +
+    '<th>Порядок</th><th>Участок</th><th>Код операции</th><th>Операция</th>' +
+    (showQuantityColumn ? '<th>Количество изделий</th>' : '') +
+    '<th>Исполнитель</th><th>План (мин)</th><th>Статус</th><th>Текущее / факт. время</th>' +
     (readonly ? '' : '<th>Действия</th>') +
     '<th>Комментарии</th>' +
     '</tr></thead><tbody>';
@@ -1879,7 +2136,8 @@ function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = fa
       '<td>' + escapeHtml(op.centerName) + '</td>' +
       '<td>' + escapeHtml(op.opCode || '') + '</td>' +
       '<td>' + renderOpName(op) + '</td>' +
-      '<td>' + escapeHtml(op.executor || '') + '</td>' +
+      (showQuantityColumn ? '<td>' + escapeHtml(getOperationQuantity(op, card)) + '</td>' : '') +
+      '<td>' + renderExecutorCell(op, card, { readonly }) + '</td>' +
       '<td>' + (op.plannedMinutes || '') + '</td>' +
       '<td>' + statusBadge(op.status) + '</td>' +
       '<td>' + timeCell + '</td>' +
@@ -1887,7 +2145,7 @@ function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = fa
       '<td>' + commentCell + '</td>' +
       '</tr>';
 
-    html += renderQuantityRow(card, op, { readonly, colspan: readonly ? 9 : 10, blankForPrint: quantityPrintBlanks });
+    html += renderQuantityRow(card, op, { readonly, colspan: totalColumns, blankForPrint: quantityPrintBlanks });
   });
 
   html += '</tbody></table>';
@@ -1905,6 +2163,7 @@ function buildCardInfoBlock(card) {
     { label: 'Количество', value: formatQuantityValue(card.quantity) },
     { label: 'Чертёж / обозначение детали', value: card.drawing },
     { label: 'Материал', value: card.material },
+    { label: 'Номер договора', value: card.contractNumber },
     { label: 'Описание', value: card.desc }
   ];
 
@@ -1921,9 +2180,9 @@ function buildCardInfoBlock(card) {
 }
 
 function renderQuantityRow(card, op, { readonly = false, colspan = 9, blankForPrint = false } = {}) {
-  const totalQty = card && card.quantity !== '' && card.quantity != null ? card.quantity : '';
-  const totalLabel = totalQty === '' ? '—' : totalQty + ' шт';
-  const base = '<span class="qty-total">Количество по карте: ' + escapeHtml(totalLabel) + '</span>';
+  const opQty = getOperationQuantity(op, card);
+  const totalLabel = opQty === '' ? '—' : opQty + ' шт';
+  const base = '<span class="qty-total">Количество изделий: ' + escapeHtml(totalLabel) + '</span>';
   const lockRow = readonly || op.status === 'DONE';
   const goodVal = op.goodCount != null ? op.goodCount : 0;
   const scrapVal = op.scrapCount != null ? op.scrapCount : 0;
@@ -1967,6 +2226,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
   }
 
   const termRaw = workorderSearchTerm.trim();
+  const contractTerm = workorderContractTerm.trim().toLowerCase();
   const filteredByStatus = cardsWithOps.filter(card => {
     const state = getCardProcessState(card);
     return workorderStatusFilter === 'ALL' || state.key === workorderStatusFilter;
@@ -1986,13 +2246,17 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
     ? sortedCards.filter(card => cardSearchScore(card, termRaw) > 0)
     : sortedCards;
 
-  if (!filteredBySearch.length) {
+  const filteredByContract = contractTerm
+    ? filteredBySearch.filter(card => (card.contractNumber || '').toLowerCase().includes(contractTerm))
+    : filteredBySearch;
+
+  if (!filteredByContract.length) {
     wrapper.innerHTML = '<p>Карты по запросу не найдены.</p>';
     return;
   }
 
   let html = '';
-  filteredBySearch.forEach(card => {
+  filteredByContract.forEach(card => {
     const opened = !collapseAll && workorderOpenCards.has(card.id);
     const stateBadge = renderCardStateBadge(card);
     const canArchive = card.status === 'DONE';
@@ -2000,6 +2264,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
     const barcodeInline = card.barcode
       ? ' • № карты: <span class="summary-barcode">' + escapeHtml(card.barcode) + ' <button type="button" class="btn-small btn-secondary wo-barcode-btn" data-card-id="' + card.id + '">Штрихкод</button></span>'
       : '';
+    const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
     const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
     const logButton = ' <button type="button" class="btn-small btn-secondary log-btn" data-log-card="' + card.id + '">Log</button>';
 
@@ -2009,7 +2274,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       '<div class="summary-text">' +
       '<strong>' + escapeHtml(card.name || card.id) + '</strong>' +
       ' <span class="summary-sub">' +
-      (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') +
+      (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') + contractText +
       barcodeInline + filesButton + logButton +
       '</span>' +
       '</div>' +
@@ -2021,7 +2286,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       '</summary>';
 
     html += buildCardInfoBlock(card);
-    html += buildOperationsTable(card, { readonly: false });
+    html += buildOperationsTable(card, { readonly: false, showQuantityColumn: false });
     html += '</details>';
   });
 
@@ -2115,6 +2380,92 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
     });
   });
 
+  wrapper.querySelectorAll('.executor-main-input').forEach(input => {
+    input.addEventListener('focus', () => {
+      input.dataset.prevVal = input.value || '';
+    });
+    input.addEventListener('input', e => {
+      const cardId = input.getAttribute('data-card-id');
+      const opId = input.getAttribute('data-op-id');
+      const card = cards.find(c => c.id === cardId);
+      const op = card ? (card.operations || []).find(o => o.id === opId) : null;
+      if (!op) return;
+      op.executor = (e.target.value || '').trim();
+    });
+    input.addEventListener('blur', e => {
+      const cardId = input.getAttribute('data-card-id');
+      const opId = input.getAttribute('data-op-id');
+      const card = cards.find(c => c.id === cardId);
+      const op = card ? (card.operations || []).find(o => o.id === opId) : null;
+      if (!op || !card) return;
+      const value = (e.target.value || '').trim();
+      const prev = input.dataset.prevVal || '';
+      op.executor = value;
+      if (prev !== value) {
+        recordCardLog(card, { action: 'Исполнитель', object: opLogLabel(op), field: 'executor', targetId: op.id, oldValue: prev, newValue: value });
+        saveData();
+        renderDashboard();
+      }
+    });
+  });
+
+  wrapper.querySelectorAll('.add-executor-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const cardId = btn.getAttribute('data-card-id');
+      const opId = btn.getAttribute('data-op-id');
+      const card = cards.find(c => c.id === cardId);
+      const op = card ? (card.operations || []).find(o => o.id === opId) : null;
+      if (!card || !op) return;
+      if (!Array.isArray(op.additionalExecutors)) op.additionalExecutors = [];
+      if (op.additionalExecutors.length >= 2) return;
+      op.additionalExecutors.push('');
+      recordCardLog(card, { action: 'Доп. исполнитель', object: opLogLabel(op), field: 'additionalExecutors', targetId: op.id, oldValue: op.additionalExecutors.length - 1, newValue: op.additionalExecutors.length });
+      saveData();
+      workorderOpenCards.add(cardId);
+      renderWorkordersTable();
+    });
+  });
+
+  wrapper.querySelectorAll('.remove-executor-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const cardId = btn.getAttribute('data-card-id');
+      const opId = btn.getAttribute('data-op-id');
+      const idx = parseInt(btn.getAttribute('data-extra-index'), 10);
+      const card = cards.find(c => c.id === cardId);
+      const op = card ? (card.operations || []).find(o => o.id === opId) : null;
+      if (!card || !op || !Array.isArray(op.additionalExecutors)) return;
+      if (idx < 0 || idx >= op.additionalExecutors.length) return;
+      const removed = op.additionalExecutors.splice(idx, 1)[0];
+      recordCardLog(card, { action: 'Доп. исполнитель', object: opLogLabel(op), field: 'additionalExecutors', targetId: op.id, oldValue: removed, newValue: 'удален' });
+      saveData();
+      workorderOpenCards.add(cardId);
+      renderWorkordersTable();
+    });
+  });
+
+  wrapper.querySelectorAll('.additional-executor-input').forEach(input => {
+    input.addEventListener('focus', () => {
+      input.dataset.prevVal = input.value || '';
+    });
+    input.addEventListener('blur', e => {
+      const cardId = input.getAttribute('data-card-id');
+      const opId = input.getAttribute('data-op-id');
+      const idx = parseInt(input.getAttribute('data-extra-index'), 10);
+      const card = cards.find(c => c.id === cardId);
+      const op = card ? (card.operations || []).find(o => o.id === opId) : null;
+      if (!card || !op || !Array.isArray(op.additionalExecutors)) return;
+      const value = (e.target.value || '').trim();
+      const prev = input.dataset.prevVal || '';
+      if (idx < 0 || idx >= op.additionalExecutors.length) return;
+      op.additionalExecutors[idx] = value;
+      if (prev !== value) {
+        recordCardLog(card, { action: 'Доп. исполнитель', object: opLogLabel(op), field: 'additionalExecutors', targetId: op.id, oldValue: prev, newValue: value });
+        saveData();
+        renderDashboard();
+      }
+    });
+  });
+
   wrapper.querySelectorAll('.qty-input').forEach(input => {
     const cardId = input.getAttribute('data-card-id');
     const opId = input.getAttribute('data-op-id');
@@ -2193,7 +2544,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
           const diff = op.startedAt ? (now - op.startedAt) / 1000 : 0;
           op.elapsedSeconds = (op.elapsedSeconds || 0) + diff;
         }
-        const qtyTotal = toSafeCount(card.quantity);
+        const qtyTotal = getOperationQuantity(op, card);
         if (qtyTotal > 0) {
           const sum = toSafeCount(op.goodCount || 0) + toSafeCount(op.scrapCount || 0) + toSafeCount(op.holdCount || 0);
           if (sum !== qtyTotal) {
@@ -2233,6 +2584,7 @@ function renderArchiveTable() {
   }
 
   const termRaw = archiveSearchTerm.trim();
+  const contractTerm = archiveContractTerm.trim().toLowerCase();
   const filteredByStatus = archivedCards.filter(card => {
     const state = getCardProcessState(card);
     return archiveStatusFilter === 'ALL' || state.key === archiveStatusFilter;
@@ -2252,18 +2604,23 @@ function renderArchiveTable() {
     ? sortedCards.filter(card => cardSearchScore(card, termRaw) > 0)
     : sortedCards;
 
-  if (!filteredBySearch.length) {
+  const filteredByContract = contractTerm
+    ? filteredBySearch.filter(card => (card.contractNumber || '').toLowerCase().includes(contractTerm))
+    : filteredBySearch;
+
+  if (!filteredByContract.length) {
     wrapper.innerHTML = '<p>Архивные карты по запросу не найдены.</p>';
     return;
   }
 
   let html = '';
-  filteredBySearch.forEach(card => {
+  filteredByContract.forEach(card => {
     const stateBadge = renderCardStateBadge(card);
     const filesCount = (card.attachments || []).length;
     const barcodeInline = card.barcode
       ? ' • № карты: <span class="summary-barcode">' + escapeHtml(card.barcode) + ' <button type="button" class="btn-small btn-secondary wo-barcode-btn" data-card-id="' + card.id + '">Штрихкод</button></span>'
       : '';
+    const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
     const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
     const logButton = ' <button type="button" class="btn-small btn-secondary log-btn" data-log-card="' + card.id + '">Log</button>';
 
@@ -2273,7 +2630,7 @@ function renderArchiveTable() {
       '<div class="summary-text">' +
       '<strong>' + escapeHtml(card.name || card.id) + '</strong>' +
       ' <span class="summary-sub">' +
-      (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') +
+      (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') + contractText +
       barcodeInline + filesButton + logButton +
       '</span>' +
       '</div>' +
@@ -2369,6 +2726,7 @@ function tickTimers() {
     }
   });
 
+  refreshCardStatuses();
   renderDashboard();
 }
 
@@ -2430,6 +2788,21 @@ function setupForms() {
     cardForm.addEventListener('submit', e => e.preventDefault());
   }
 
+  const cardQtyInput = document.getElementById('card-qty');
+  if (cardQtyInput) {
+    cardQtyInput.addEventListener('input', e => {
+      if (!activeCardDraft) return;
+      const raw = e.target.value.trim();
+      const qtyVal = raw === '' ? '' : Math.max(0, parseInt(raw, 10) || 0);
+      activeCardDraft.quantity = Number.isFinite(qtyVal) ? qtyVal : '';
+      if (!routeQtyManual) {
+        const qtyField = document.getElementById('route-qty');
+        if (qtyField) qtyField.value = activeCardDraft.quantity !== '' ? activeCardDraft.quantity : '';
+      }
+      renderRouteTableDraft();
+    });
+  }
+
   const saveBtn = document.getElementById('card-save-btn');
   if (saveBtn) {
     saveBtn.addEventListener('click', () => {
@@ -2459,30 +2832,64 @@ function setupForms() {
   document.getElementById('route-form').addEventListener('submit', e => {
     e.preventDefault();
     if (!activeCardDraft) return;
-    const opId = document.getElementById('route-op').value;
-    const centerId = document.getElementById('route-center').value;
-    const executor = document.getElementById('route-executor').value.trim();
+    const opInput = document.getElementById('route-op');
+    const opList = document.getElementById('route-op-options');
+    const centerInput = document.getElementById('route-center');
+    const centerList = document.getElementById('route-center-options');
+    const opMatch = Array.from(opList ? opList.options : []).find(opt => opt.value === (opInput ? opInput.value.trim() : ''));
+    const centerMatch = Array.from(centerList ? centerList.options : []).find(opt => opt.value === (centerInput ? centerInput.value.trim() : ''));
+    const opId = opMatch ? opMatch.dataset.id : null;
+    const centerId = centerMatch ? centerMatch.dataset.id : null;
     const planned = parseInt(document.getElementById('route-planned').value, 10) || 30;
-    const opRef = ops.find(o => o.id === opId);
-    const centerRef = centers.find(c => c.id === centerId);
-    if (!opRef || !centerRef) return;
+    const codeValue = document.getElementById('route-op-code').value.trim();
+    const qtyInput = document.getElementById('route-qty').value.trim();
+    const qtyValue = qtyInput === '' ? activeCardDraft.quantity : qtyInput;
+    let opRef = ops.find(o => o.id === opId);
+    let centerRef = centers.find(c => c.id === centerId);
+    const opTerm = (opInput ? opInput.value : '').trim().toLowerCase();
+    const centerTerm = (centerInput ? centerInput.value : '').trim().toLowerCase();
+    if (!opRef && opTerm) {
+      opRef = ops.find(o => formatOpLabel(o).toLowerCase() === opTerm) || ops.find(o => formatOpLabel(o).toLowerCase().includes(opTerm));
+    }
+    if (!centerRef && centerTerm) {
+      centerRef = centers.find(c => (c.name || '').toLowerCase() === centerTerm) || centers.find(c => (c.name || '').toLowerCase().includes(centerTerm));
+    }
+    if (!opRef || !centerRef) {
+      alert('Выберите операцию и участок из списка.');
+      return;
+    }
     const maxOrder = activeCardDraft.operations && activeCardDraft.operations.length
       ? Math.max.apply(null, activeCardDraft.operations.map(o => o.order || 0))
       : 0;
-    const rop = createRouteOpFromRefs(opRef, centerRef, executor, planned, maxOrder + 1);
+    const rop = createRouteOpFromRefs(opRef, centerRef, '', planned, maxOrder + 1, {
+      code: codeValue,
+      autoCode: !codeValue,
+      quantity: qtyValue
+    });
     activeCardDraft.operations = activeCardDraft.operations || [];
     activeCardDraft.operations.push(rop);
+    renumberAutoCodesForCard(activeCardDraft);
     document.getElementById('card-status-text').textContent = cardStatusText(activeCardDraft);
     renderRouteTableDraft();
     document.getElementById('route-form').reset();
+    routeQtyManual = false;
+    const qtyField = document.getElementById('route-qty');
+    if (qtyField) qtyField.value = activeCardDraft.quantity !== '' ? activeCardDraft.quantity : '';
+    if (opInput) opInput.value = '';
+    if (centerInput) centerInput.value = '';
     fillRouteSelectors();
   });
 
-  const routeOpCodeInput = document.getElementById('route-op-code-filter');
-  if (routeOpCodeInput) {
-    routeOpCodeInput.addEventListener('input', e => {
-      routeOpCodeFilter = (e.target.value || '').trim();
-      fillRouteSelectors();
+  const routeQtyField = document.getElementById('route-qty');
+  if (routeQtyField) {
+    routeQtyField.addEventListener('input', e => {
+      const raw = e.target.value;
+      routeQtyManual = raw !== '';
+      if (raw !== '') {
+        e.target.value = toSafeCount(raw);
+      } else if (activeCardDraft) {
+        e.target.value = activeCardDraft.quantity !== '' ? activeCardDraft.quantity : '';
+      }
     });
   }
 
@@ -2500,20 +2907,12 @@ function setupForms() {
 
       document.getElementById('op-form').addEventListener('submit', e => {
         e.preventDefault();
-        const codeInput = document.getElementById('op-code').value.trim();
         const name = document.getElementById('op-name').value.trim();
         const desc = document.getElementById('op-desc').value.trim();
         const time = parseInt(document.getElementById('op-time').value, 10) || 30;
         if (!name) return;
         const used = collectUsedOpCodes();
-        let code = codeInput;
-        if (code && used.has(code)) {
-          alert('Такой код операции уже используется. Введите другой код.');
-          return;
-        }
-        if (!code) {
-          code = generateUniqueOpCode(used);
-        }
+        const code = generateUniqueOpCode(used);
         ops.push({ id: genId('op'), code, name: name, desc: desc, recTime: time });
         saveData();
         renderOpsTable();
@@ -2523,9 +2922,16 @@ function setupForms() {
 
   const cardsSearchInput = document.getElementById('cards-search');
   const cardsSearchClear = document.getElementById('cards-search-clear');
+  const cardsContractInput = document.getElementById('cards-contract');
   if (cardsSearchInput) {
     cardsSearchInput.addEventListener('input', e => {
       cardsSearchTerm = e.target.value || '';
+      renderCardsTable();
+    });
+  }
+  if (cardsContractInput) {
+    cardsContractInput.addEventListener('input', e => {
+      cardsContractTerm = e.target.value || '';
       renderCardsTable();
     });
   }
@@ -2533,6 +2939,8 @@ function setupForms() {
     cardsSearchClear.addEventListener('click', () => {
       cardsSearchTerm = '';
       if (cardsSearchInput) cardsSearchInput.value = '';
+      cardsContractTerm = '';
+      if (cardsContractInput) cardsContractInput.value = '';
       renderCardsTable();
     });
   }
@@ -2540,9 +2948,16 @@ function setupForms() {
   const searchInput = document.getElementById('workorder-search');
   const searchClearBtn = document.getElementById('workorder-search-clear');
   const statusSelect = document.getElementById('workorder-status');
+  const contractInput = document.getElementById('workorder-contract');
   if (searchInput) {
     searchInput.addEventListener('input', e => {
       workorderSearchTerm = e.target.value || '';
+      renderWorkordersTable({ collapseAll: true });
+    });
+  }
+  if (contractInput) {
+    contractInput.addEventListener('input', e => {
+      workorderContractTerm = e.target.value || '';
       renderWorkordersTable({ collapseAll: true });
     });
   }
@@ -2550,6 +2965,8 @@ function setupForms() {
     searchClearBtn.addEventListener('click', () => {
       workorderSearchTerm = '';
       if (searchInput) searchInput.value = '';
+      workorderContractTerm = '';
+      if (contractInput) contractInput.value = '';
       if (statusSelect) statusSelect.value = 'ALL';
       workorderStatusFilter = 'ALL';
       renderWorkordersTable({ collapseAll: true });
@@ -2566,9 +2983,16 @@ function setupForms() {
   const archiveSearchInput = document.getElementById('archive-search');
   const archiveSearchClear = document.getElementById('archive-search-clear');
   const archiveStatusSelect = document.getElementById('archive-status');
+  const archiveContractInput = document.getElementById('archive-contract');
   if (archiveSearchInput) {
     archiveSearchInput.addEventListener('input', e => {
       archiveSearchTerm = e.target.value || '';
+      renderArchiveTable();
+    });
+  }
+  if (archiveContractInput) {
+    archiveContractInput.addEventListener('input', e => {
+      archiveContractTerm = e.target.value || '';
       renderArchiveTable();
     });
   }
@@ -2582,6 +3006,8 @@ function setupForms() {
     archiveSearchClear.addEventListener('click', () => {
       archiveSearchTerm = '';
       if (archiveSearchInput) archiveSearchInput.value = '';
+      archiveContractTerm = '';
+      if (archiveContractInput) archiveContractInput.value = '';
       archiveStatusFilter = 'ALL';
       if (archiveStatusSelect) archiveStatusSelect.value = 'ALL';
       renderArchiveTable();
@@ -2590,7 +3016,12 @@ function setupForms() {
 }
 
 // === ОБЩИЙ РЕНДЕР ===
+function refreshCardStatuses() {
+  cards.forEach(card => recalcCardStatus(card));
+}
+
 function renderEverything() {
+  refreshCardStatuses();
   renderDashboard();
   renderCardsTable();
   renderCentersTable();
