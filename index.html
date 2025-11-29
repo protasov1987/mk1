@@ -39,11 +39,6 @@
     <section id="cards">
       <div class="card">
         <h2>Технологические карты</h2>
-        <div class="cards-subtabs">
-          <button class="subtab-btn active" data-cards-tab="list">Карты</button>
-          <button class="subtab-btn" data-cards-tab="directory">Операции и участки</button>
-        </div>
-
         <div id="cards-list-panel" class="cards-tab-panel">
           <div class="flex" style="margin-bottom:8px; align-items:flex-end; flex-wrap:wrap; gap:8px;">
             <div class="flex-col" style="flex:1 1 260px;">
@@ -61,53 +56,10 @@
           <div class="cards-toolbar">
             <div class="button-group">
               <button class="btn-primary" id="btn-new-card">Создать карту</button>
+              <button class="btn-secondary" id="btn-directory-modal">Операции и участки</button>
             </div>
           </div>
           <div id="cards-table-wrapper"></div>
-        </div>
-
-        <div id="cards-directory-panel" class="cards-tab-panel hidden">
-          <div class="directory-grid inset-card">
-            <div class="directory-panel">
-              <h3>Справочник участков</h3>
-              <form id="center-form" class="flex" style="flex-wrap:wrap;">
-                <div class="flex-col" style="flex:1 1 200px;">
-                  <label for="center-name">Название участка</label>
-                  <input id="center-name" required />
-                </div>
-                <div class="flex-col" style="flex:2 1 260px;">
-                  <label for="center-desc">Описание</label>
-                  <input id="center-desc" />
-                </div>
-                <div class="flex-col" style="flex:0 0 auto; align-self:flex-end;">
-                  <button type="submit" class="btn-primary">Добавить участок</button>
-                </div>
-              </form>
-              <div id="centers-table-wrapper"></div>
-            </div>
-
-            <div class="directory-panel">
-              <h3>Справочник операций</h3>
-              <form id="op-form" class="flex" style="flex-wrap:wrap;">
-                <div class="flex-col" style="flex:1 1 200px;">
-                  <label for="op-name">Название операции</label>
-                  <input id="op-name" required />
-                </div>
-                <div class="flex-col" style="flex:2 1 260px;">
-                  <label for="op-desc">Описание</label>
-                  <input id="op-desc" />
-                </div>
-                <div class="flex-col" style="flex:0 1 140px;">
-                  <label for="op-time">Рекомендуемое время (мин)</label>
-                  <input id="op-time" type="number" min="1" value="30" />
-                </div>
-                <div class="flex-col" style="flex:0 0 auto; align-self:flex-end;">
-                  <button type="submit" class="btn-primary">Добавить операцию</button>
-                </div>
-              </form>
-              <div id="ops-table-wrapper"></div>
-            </div>
-          </div>
         </div>
       </div>
     </section>
@@ -192,7 +144,7 @@
         <div id="archive-table-wrapper"></div>
       </div>
     </section>
-    <div id="card-modal" class="card-page hidden" aria-labelledby="card-modal-title">
+    <div id="card-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="card-modal-title">
       <div class="modal-content card-modal-content">
         <div class="modal-header">
           <h2 id="card-modal-title">Карта</h2>
@@ -343,6 +295,58 @@
             <button type="button" id="log-print-summary" class="btn-primary">Печать сводной таблицы</button>
             <button type="button" id="log-print-all" class="btn-primary">Печать</button>
             <button type="button" id="log-close-bottom" class="btn-secondary">Закрыть</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="directory-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="directory-title">
+    <div class="modal-content directory-modal-content">
+      <div class="modal-header" style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+        <h3 id="directory-title" style="margin:0;">Справочники операций и участков</h3>
+        <button type="button" id="directory-close" class="btn-secondary">Закрыть</button>
+      </div>
+      <div class="modal-body">
+        <div class="directory-grid inset-card">
+          <div class="directory-panel">
+            <h3>Справочник участков</h3>
+            <form id="center-form" class="flex" style="flex-wrap:wrap;">
+              <div class="flex-col" style="flex:1 1 200px;">
+                <label for="center-name">Название участка</label>
+                <input id="center-name" required />
+              </div>
+              <div class="flex-col" style="flex:2 1 260px;">
+                <label for="center-desc">Описание</label>
+                <input id="center-desc" />
+              </div>
+              <div class="flex-col" style="flex:0 0 auto; align-self:flex-end;">
+                <button type="submit" class="btn-primary">Добавить участок</button>
+              </div>
+            </form>
+            <div id="centers-table-wrapper"></div>
+          </div>
+
+          <div class="directory-panel">
+            <h3>Справочник операций</h3>
+            <form id="op-form" class="flex" style="flex-wrap:wrap;">
+              <div class="flex-col" style="flex:1 1 200px;">
+                <label for="op-name">Название операции</label>
+                <input id="op-name" required />
+              </div>
+              <div class="flex-col" style="flex:2 1 260px;">
+                <label for="op-desc">Описание</label>
+                <input id="op-desc" />
+              </div>
+              <div class="flex-col" style="flex:0 1 140px;">
+                <label for="op-time">Рекомендуемое время (мин)</label>
+                <input id="op-time" type="number" min="1" value="30" />
+              </div>
+              <div class="flex-col" style="flex:0 0 auto; align-self:flex-end;">
+                <button type="submit" class="btn-primary">Добавить операцию</button>
+              </div>
+            </form>
+            <div id="ops-table-wrapper"></div>
           </div>
         </div>
       </div>
