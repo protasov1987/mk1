@@ -202,10 +202,14 @@ function recalcCardStatus(card) {
   const hasActive = opsArr.some(o => o.status === 'IN_PROGRESS' || o.status === 'PAUSED');
   const allDone = opsArr.length > 0 && opsArr.every(o => o.status === 'DONE');
   const hasNotStarted = opsArr.some(o => o.status === 'NOT_STARTED' || !o.status);
+  const hasDone = opsArr.some(o => o.status === 'DONE');
+  const doneAndNotStartedOnly = !hasActive && hasDone && hasNotStarted;
   if (hasActive) {
     card.status = 'IN_PROGRESS';
   } else if (allDone && !hasNotStarted) {
     card.status = 'DONE';
+  } else if (doneAndNotStartedOnly) {
+    card.status = 'PAUSED';
   } else {
     card.status = 'NOT_STARTED';
   }

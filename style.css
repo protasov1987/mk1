@@ -680,6 +680,12 @@ footer {
   border-color: #10b981;
 }
 
+.status-pill-missing-executor {
+  background: #fef08a;
+  color: #854d0e;
+  border-color: #facc15;
+}
+
 .status-pill-done {
   width: 28px;
   height: 28px;
@@ -704,6 +710,18 @@ footer {
 .comment-readonly {
   min-height: 20px;
   padding: 4px 2px;
+  color: #374151;
+}
+
+.checkbox-row {
+  margin-top: 6px;
+}
+
+.checkbox-label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 14px;
   color: #374151;
 }
 

@@ -6,6 +6,7 @@ let ops = [];
 let centers = [];
 let workorderSearchTerm = '';
 let workorderStatusFilter = 'ALL';
+let workorderMissingExecutorOnly = false;
 let archiveSearchTerm = '';
 let archiveStatusFilter = 'ALL';
 let apiOnline = false;
@@ -446,10 +447,14 @@ function recalcCardStatus(card) {
   const hasActive = opsArr.some(o => o.status === 'IN_PROGRESS' || o.status === 'PAUSED');
   const allDone = opsArr.length > 0 && opsArr.every(o => o.status === 'DONE');
   const hasNotStarted = opsArr.some(o => o.status === 'NOT_STARTED' || !o.status);
+  const hasDone = opsArr.some(o => o.status === 'DONE');
+  const doneAndNotStartedOnly = !hasActive && hasDone && hasNotStarted;
   if (hasActive) {
     card.status = 'IN_PROGRESS';
   } else if (allDone && !hasNotStarted) {
     card.status = 'DONE';
+  } else if (doneAndNotStartedOnly) {
+    card.status = 'PAUSED';
   } else {
     card.status = 'NOT_STARTED';
   }
@@ -510,11 +515,13 @@ function getCardProcessState(card) {
   const allDone = opsArr.length > 0 && opsArr.every(o => o.status === 'DONE');
   const allNotStarted = opsArr.length > 0 && opsArr.every(o => o.status === 'NOT_STARTED' || !o.status);
   const hasAnyDone = opsArr.some(o => o.status === 'DONE');
+  const hasAnyNotStarted = opsArr.some(o => o.status === 'NOT_STARTED' || !o.status);
+  const doneAndNotStartedOnly = !hasInProgress && !hasPaused && hasAnyDone && hasAnyNotStarted;
 
   if (allDone) return { key: 'DONE', label: 'Выполнено', className: 'done' };
   if (hasInProgress && hasPaused) return { key: 'MIXED', label: 'Смешанно', className: 'mixed' };
   if (hasInProgress) return { key: 'IN_PROGRESS', label: 'Выполняется', className: 'in-progress' };
-  if (hasPaused) return { key: 'PAUSED', label: 'Пауза', className: 'paused' };
+  if (hasPaused || doneAndNotStartedOnly) return { key: 'PAUSED', label: 'Пауза', className: 'paused' };
   if (allNotStarted) return { key: 'NOT_STARTED', label: 'Не запущена', className: 'not-started' };
   if (hasAnyDone) return { key: 'IN_PROGRESS', label: 'Выполняется', className: 'in-progress' };
   return { key: 'NOT_STARTED', label: 'Не запущена', className: 'not-started' };
@@ -529,6 +536,21 @@ function renderCardStateBadge(card) {
     return '<span class="status-pill status-pill-mixed" title="Смешанный статус">Смешанно</span>';
   }
   return '<span class="status-pill status-pill-' + state.className + '">' + state.label + '</span>';
+}
+
+function hasOperationExecutor(op) {
+  if (!op) return false;
+  const primary = (op.executor || '').trim();
+  const extraSingle = (op.additionalExecutor || op.executorAdditional || op.executorSecondary || op.extraExecutor || '').trim();
+  const additionalList = Array.isArray(op.additionalExecutors)
+    ? op.additionalExecutors.map(v => (v || '').toString().trim()).filter(Boolean)
+    : [];
+  return Boolean(primary || extraSingle || additionalList.length);
+}
+
+function cardHasExecutorGap(card) {
+  const opsArr = card && Array.isArray(card.operations) ? card.operations : [];
+  return opsArr.some(op => !hasOperationExecutor(op));
 }
 
 function getCardComment(card) {
@@ -1972,12 +1994,16 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
     return workorderStatusFilter === 'ALL' || state.key === workorderStatusFilter;
   });
 
-  if (!filteredByStatus.length) {
+  const filteredByExecutor = workorderMissingExecutorOnly
+    ? filteredByStatus.filter(card => cardHasExecutorGap(card))
+    : filteredByStatus;
+
+  if (!filteredByExecutor.length) {
     wrapper.innerHTML = '<p>Нет карт, подходящих под выбранный фильтр.</p>';
     return;
   }
 
-  let sortedCards = [...filteredByStatus];
+  let sortedCards = [...filteredByExecutor];
   if (termRaw) {
     sortedCards.sort((a, b) => cardSearchScore(b, termRaw) - cardSearchScore(a, termRaw));
   }
@@ -1995,6 +2021,9 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
   filteredBySearch.forEach(card => {
     const opened = !collapseAll && workorderOpenCards.has(card.id);
     const stateBadge = renderCardStateBadge(card);
+    const executorBadge = cardHasExecutorGap(card)
+      ? ' <span class="status-pill status-pill-missing-executor">Нет исполнителя</span>'
+      : '';
     const canArchive = card.status === 'DONE';
     const filesCount = (card.attachments || []).length;
     const barcodeInline = card.barcode
@@ -2014,7 +2043,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       '</span>' +
       '</div>' +
       '<div class="summary-actions">' +
-      ' ' + stateBadge +
+      ' ' + stateBadge + executorBadge +
       (canArchive ? ' <button type="button" class="btn-small btn-secondary archive-move-btn" data-card-id="' + card.id + '">Перенести в архив</button>' : '') +
       '</div>' +
       '</div>' +
@@ -2540,6 +2569,7 @@ function setupForms() {
   const searchInput = document.getElementById('workorder-search');
   const searchClearBtn = document.getElementById('workorder-search-clear');
   const statusSelect = document.getElementById('workorder-status');
+  const missingExecutorCheckbox = document.getElementById('workorder-missing-executor');
   if (searchInput) {
     searchInput.addEventListener('input', e => {
       workorderSearchTerm = e.target.value || '';
@@ -2552,6 +2582,8 @@ function setupForms() {
       if (searchInput) searchInput.value = '';
       if (statusSelect) statusSelect.value = 'ALL';
       workorderStatusFilter = 'ALL';
+      workorderMissingExecutorOnly = false;
+      if (missingExecutorCheckbox) missingExecutorCheckbox.checked = false;
       renderWorkordersTable({ collapseAll: true });
     });
   }
@@ -2559,6 +2591,13 @@ function setupForms() {
   if (statusSelect) {
     statusSelect.addEventListener('change', e => {
       workorderStatusFilter = e.target.value || 'ALL';
+      renderWorkordersTable({ collapseAll: true });
+    });
+  }
+
+  if (missingExecutorCheckbox) {
+    missingExecutorCheckbox.addEventListener('change', e => {
+      workorderMissingExecutorOnly = Boolean(e.target.checked);
       renderWorkordersTable({ collapseAll: true });
     });
   }
