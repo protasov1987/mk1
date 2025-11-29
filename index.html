@@ -60,6 +60,9 @@
             </div>
           </div>
           <div id="cards-table-wrapper"></div>
+          <div class="cards-footer-actions">
+            <button class="btn-secondary" id="btn-new-group">Создать группу карт</button>
+          </div>
         </div>
       </div>
     </section>
@@ -237,6 +240,31 @@
       </div>
     </div>
   </main>
+
+  <div id="group-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="group-modal-title">
+    <div class="modal-content" style="max-width:480px;">
+      <div class="modal-header">
+        <h3 id="group-modal-title">Создание группы карт</h3>
+      </div>
+      <div class="modal-body">
+        <div class="flex-col" style="gap:12px;">
+          <label class="flex-col">
+            <span>Наименование группы</span>
+            <input id="group-name-input" placeholder="Например, Партия 1" />
+          </label>
+          <label class="flex-col">
+            <span>Количество карт в группе</span>
+            <input id="group-count-input" type="number" min="1" step="1" value="2" />
+          </label>
+          <p class="small-hint">Будут использованы параметры и маршрут из текущего шаблона в "Создании карт".</p>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="group-create-btn" class="btn-primary">Создать группу</button>
+        <button type="button" id="group-cancel-btn" class="btn-secondary">Отмена</button>
+      </div>
+    </div>
+  </div>
 
   <footer>
     Локальное веб-приложение. Данные сохраняются на сервере и доступны из нескольких браузеров.

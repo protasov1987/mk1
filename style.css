@@ -825,6 +825,21 @@ footer {
   font-weight: 700;
 }
 
+.group-mark {
+  color: #7c3aed;
+  font-weight: 700;
+}
+
+.cards-footer-actions {
+  margin-top: 12px;
+}
+
+.small-hint {
+  color: #6b7280;
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+
 .comment-input {
   width: 100%;
   padding: 6px 8px;
