@@ -566,6 +566,11 @@ tbody tr:nth-child(even) {
   gap: 6px;
 }
 
+.executor-main-input {
+  flex: 1;
+  padding: 6px 8px;
+}
+
 .executor-name {
   font-weight: 600;
 }

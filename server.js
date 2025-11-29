@@ -77,6 +77,9 @@ function createRouteOpFromRefs(op, center, executor, plannedMinutes, order, opti
     plannedMinutes: plannedMinutes || op.recTime || 30,
     quantity: quantity === '' || quantity == null ? '' : parseInt(quantity, 10) || 0,
     autoCode,
+    additionalExecutors: Array.isArray(op.additionalExecutors)
+      ? op.additionalExecutors.slice(0, 2)
+      : [],
     status: 'NOT_STARTED',
     firstStartedAt: null,
     startedAt: null,

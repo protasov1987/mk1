@@ -17,6 +17,7 @@ let cardsSearchTerm = '';
 let workorderContractTerm = '';
 let archiveContractTerm = '';
 let attachmentContext = null;
+let routeQtyManual = false;
 const ATTACH_ACCEPT = '.pdf,.doc,.docx,.jpg,.jpeg,.png,.zip,.rar,.7z';
 const ATTACH_MAX_SIZE = 15 * 1024 * 1024; // 15 MB
 let logContextCardId = null;
@@ -461,6 +462,9 @@ function createRouteOpFromRefs(op, center, executor, plannedMinutes, order, opti
     plannedMinutes: plannedMinutes || op.recTime || 30,
     quantity: quantity === '' || quantity == null ? '' : toSafeCount(quantity),
     autoCode,
+    additionalExecutors: Array.isArray(op.additionalExecutors)
+      ? op.additionalExecutors.slice(0, 2)
+      : [],
     status: 'NOT_STARTED',
     firstStartedAt: null,
     startedAt: null,
@@ -1062,7 +1066,12 @@ function openCardModal(cardId) {
   }
   const routeCodeInput = document.getElementById('route-op-code');
   if (routeCodeInput) routeCodeInput.value = '';
+  const routeOpFilter = document.getElementById('route-op-filter');
+  if (routeOpFilter) routeOpFilter.value = '';
+  const routeCenterFilter = document.getElementById('route-center-filter');
+  if (routeCenterFilter) routeCenterFilter.value = '';
   const routeQtyInput = document.getElementById('route-qty');
+  routeQtyManual = false;
   if (routeQtyInput) routeQtyInput.value = activeCardDraft.quantity !== '' ? activeCardDraft.quantity : '';
   renderRouteTableDraft();
   fillRouteSelectors();
@@ -1079,6 +1088,7 @@ function closeCardModal() {
   activeCardDraft = null;
   activeCardOriginalId = null;
   activeCardIsNew = false;
+  routeQtyManual = false;
 }
 
 function saveCardDraft() {
@@ -1222,17 +1232,14 @@ function renderAttachmentsModal() {
     let html = '<table class="attachments-table"><thead><tr><th>Имя файла</th><th>Размер</th><th>Дата</th><th>Действия</th></tr></thead><tbody>';
     files.forEach(file => {
       const date = new Date(file.createdAt || Date.now()).toLocaleString();
-      const downloadAttr = attachmentContext.source === 'live'
-        ? 'href="/files/' + file.id + '" target="_blank" rel="noopener"'
-        : '';
       html += '<tr>' +
         '<td>' + escapeHtml(file.name || 'файл') + '</td>' +
         '<td>' + escapeHtml(formatBytes(file.size)) + '</td>' +
         '<td>' + escapeHtml(date) + '</td>' +
         '<td><div class="table-actions">' +
-        (attachmentContext.source === 'live'
-          ? '<a class="btn-small" ' + downloadAttr + '>Скачать</a>'
-          : '<button class="btn-small" data-download-id="' + file.id + '">Скачать</button>') +
+        '<button class="btn-small" data-preview-id="' + file.id + '">Открыть</button>' +
+        '<button class="btn-small" data-download-id="' + file.id + '">Скачать</button>' +
+        '<button class="btn-small btn-danger" data-delete-id="' + file.id + '">Удалить</button>' +
         '</div></td>' +
         '</tr>';
     });
@@ -1241,23 +1248,81 @@ function renderAttachmentsModal() {
   }
   uploadHint.textContent = 'Допустимые форматы: pdf, doc, jpg, архив. Максимум ' + formatBytes(ATTACH_MAX_SIZE) + '.';
 
-  if (attachmentContext.source !== 'live') {
-    list.querySelectorAll('button[data-download-id]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const id = btn.getAttribute('data-download-id');
-        const cardRef = getAttachmentTargetCard();
-        if (!cardRef) return;
-        const file = (cardRef.attachments || []).find(f => f.id === id);
-        if (!file || !file.content) return;
-        const blob = dataUrlToBlob(file.content, file.type);
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = file.name || 'file';
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(link.href), 5000);
-      });
+  list.querySelectorAll('button[data-preview-id]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-preview-id');
+      const cardRef = getAttachmentTargetCard();
+      if (!cardRef) return;
+      const file = (cardRef.attachments || []).find(f => f.id === id);
+      if (!file) return;
+      previewAttachment(file);
     });
+  });
+
+  list.querySelectorAll('button[data-download-id]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-download-id');
+      const cardRef = getAttachmentTargetCard();
+      if (!cardRef) return;
+      const file = (cardRef.attachments || []).find(f => f.id === id);
+      if (!file) return;
+      downloadAttachment(file);
+    });
+  });
+
+  list.querySelectorAll('button[data-delete-id]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-delete-id');
+      deleteAttachment(id);
+    });
+  });
+}
+
+function downloadAttachment(file) {
+  if (!file) return;
+  if (file.content) {
+    const blob = dataUrlToBlob(file.content, file.type);
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = file.name || 'file';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 5000);
+    return;
   }
+  if (file.id) {
+    window.open('/files/' + file.id, '_blank', 'noopener');
+  }
+}
+
+function previewAttachment(file) {
+  if (!file) return;
+  if (file.content) {
+    const blob = dataUrlToBlob(file.content, file.type);
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener');
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    return;
+  }
+  if (file.id) {
+    window.open('/files/' + file.id, '_blank', 'noopener');
+  }
+}
+
+async function deleteAttachment(fileId) {
+  const card = getAttachmentTargetCard();
+  if (!card) return;
+  ensureAttachments(card);
+  const before = card.attachments.length;
+  const idx = card.attachments.findIndex(f => f.id === fileId);
+  if (idx < 0) return;
+  card.attachments.splice(idx, 1);
+  recordCardLog(card, { action: 'Файлы', object: 'Карта', field: 'attachments', oldValue: before, newValue: card.attachments.length });
+  if (attachmentContext && attachmentContext.source === 'live') {
+    await saveData();
+    renderEverything();
+  }
+  renderAttachmentsModal();
+  updateAttachmentCounters(card.id);
 }
 
 async function addAttachmentsFromFiles(fileList) {
@@ -1811,24 +1876,67 @@ function moveRouteOpInDraft(ropId, delta) {
 function fillRouteSelectors() {
   const opSelect = document.getElementById('route-op');
   const centerSelect = document.getElementById('route-center');
+  const opFilterInput = document.getElementById('route-op-filter');
+  const centerFilterInput = document.getElementById('route-center-filter');
+  const opFilter = (opFilterInput ? opFilterInput.value : '').toLowerCase();
+  const centerFilter = (centerFilterInput ? centerFilterInput.value : '').toLowerCase();
   opSelect.innerHTML = '';
   centerSelect.innerHTML = '';
-  const current = opSelect.value;
-  ops.forEach(o => {
+  const currentOp = opSelect.value;
+  const currentCenter = centerSelect.value;
+  const filteredOps = ops.filter(o => {
+    if (!opFilter) return true;
+    const label = formatOpLabel(o).toLowerCase();
+    const desc = (o.desc || '').toLowerCase();
+    return label.includes(opFilter) || desc.includes(opFilter);
+  });
+  const filteredCenters = centers.filter(c => {
+    if (!centerFilter) return true;
+    const name = (c.name || '').toLowerCase();
+    const desc = (c.desc || '').toLowerCase();
+    return name.includes(centerFilter) || desc.includes(centerFilter);
+  });
+
+  if (!filteredOps.length) {
     const opt = document.createElement('option');
-    opt.value = o.id;
-    opt.textContent = formatOpLabel(o);
+    opt.disabled = true;
+    opt.textContent = 'Нет совпадений';
     opSelect.appendChild(opt);
-  });
-  if (current) {
-    opSelect.value = current;
+  } else {
+    filteredOps.forEach(o => {
+      const opt = document.createElement('option');
+      opt.value = o.id;
+      opt.textContent = formatOpLabel(o);
+      opSelect.appendChild(opt);
+    });
+    if (currentOp && filteredOps.some(o => o.id === currentOp)) {
+      opSelect.value = currentOp;
+    }
   }
-  centers.forEach(c => {
+
+  if (!filteredCenters.length) {
     const opt = document.createElement('option');
-    opt.value = c.id;
-    opt.textContent = c.name;
+    opt.disabled = true;
+    opt.textContent = 'Нет совпадений';
     centerSelect.appendChild(opt);
-  });
+  } else {
+    filteredCenters.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.name;
+      centerSelect.appendChild(opt);
+    });
+    if (currentCenter && filteredCenters.some(c => c.id === currentCenter)) {
+      centerSelect.value = currentCenter;
+    }
+  }
+
+  if (!opSelect.value && opSelect.options.length) {
+    opSelect.value = opSelect.options[0].value;
+  }
+  if (!centerSelect.value && centerSelect.options.length) {
+    centerSelect.value = centerSelect.options[0].value;
+  }
 }
 
 // === СПРАВОЧНИКИ ===
@@ -1933,7 +2041,7 @@ function renderExecutorCell(op, card, { readonly = false } = {}) {
   const cardId = card ? card.id : '';
   let html = '<div class="executor-cell" data-card-id="' + cardId + '" data-op-id="' + op.id + '">';
   html += '<div class="executor-row primary">' +
-    '<span class="executor-name">' + escapeHtml(op.executor || '') + '</span>' +
+    '<input type="text" class="executor-main-input" data-card-id="' + cardId + '" data-op-id="' + op.id + '" value="' + escapeHtml(op.executor || '') + '" placeholder="Исполнитель" />' +
     (extras.length < 2 ? '<button type="button" class="icon-btn add-executor-btn" data-card-id="' + cardId + '" data-op-id="' + op.id + '">+</button>' : '') +
     '</div>';
 
@@ -1950,10 +2058,14 @@ function renderExecutorCell(op, card, { readonly = false } = {}) {
   return html;
 }
 
-function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = false } = {}) {
+function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = false, showQuantityColumn = true } = {}) {
   const opsSorted = [...(card.operations || [])].sort((a, b) => (a.order || 0) - (b.order || 0));
+  const baseColumns = readonly ? 9 : 10;
+  const totalColumns = baseColumns + (showQuantityColumn ? 1 : 0);
   let html = '<table><thead><tr>' +
-    '<th>Порядок</th><th>Участок</th><th>Код операции</th><th>Операция</th><th>Количество изделий</th><th>Исполнитель</th><th>План (мин)</th><th>Статус</th><th>Текущее / факт. время</th>' +
+    '<th>Порядок</th><th>Участок</th><th>Код операции</th><th>Операция</th>' +
+    (showQuantityColumn ? '<th>Количество изделий</th>' : '') +
+    '<th>Исполнитель</th><th>План (мин)</th><th>Статус</th><th>Текущее / факт. время</th>' +
     (readonly ? '' : '<th>Действия</th>') +
     '<th>Комментарии</th>' +
     '</tr></thead><tbody>';
@@ -2002,7 +2114,7 @@ function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = fa
       '<td>' + escapeHtml(op.centerName) + '</td>' +
       '<td>' + escapeHtml(op.opCode || '') + '</td>' +
       '<td>' + renderOpName(op) + '</td>' +
-      '<td>' + escapeHtml(getOperationQuantity(op, card)) + '</td>' +
+      (showQuantityColumn ? '<td>' + escapeHtml(getOperationQuantity(op, card)) + '</td>' : '') +
       '<td>' + renderExecutorCell(op, card, { readonly }) + '</td>' +
       '<td>' + (op.plannedMinutes || '') + '</td>' +
       '<td>' + statusBadge(op.status) + '</td>' +
@@ -2011,7 +2123,7 @@ function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = fa
       '<td>' + commentCell + '</td>' +
       '</tr>';
 
-    html += renderQuantityRow(card, op, { readonly, colspan: readonly ? 10 : 11, blankForPrint: quantityPrintBlanks });
+    html += renderQuantityRow(card, op, { readonly, colspan: totalColumns, blankForPrint: quantityPrintBlanks });
   });
 
   html += '</tbody></table>';
@@ -2152,7 +2264,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       '</summary>';
 
     html += buildCardInfoBlock(card);
-    html += buildOperationsTable(card, { readonly: false });
+    html += buildOperationsTable(card, { readonly: false, showQuantityColumn: false });
     html += '</details>';
   });
 
@@ -2243,6 +2355,35 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       op.comment = value;
       saveData();
       renderDashboard();
+    });
+  });
+
+  wrapper.querySelectorAll('.executor-main-input').forEach(input => {
+    input.addEventListener('focus', () => {
+      input.dataset.prevVal = input.value || '';
+    });
+    input.addEventListener('input', e => {
+      const cardId = input.getAttribute('data-card-id');
+      const opId = input.getAttribute('data-op-id');
+      const card = cards.find(c => c.id === cardId);
+      const op = card ? (card.operations || []).find(o => o.id === opId) : null;
+      if (!op) return;
+      op.executor = (e.target.value || '').trim();
+    });
+    input.addEventListener('blur', e => {
+      const cardId = input.getAttribute('data-card-id');
+      const opId = input.getAttribute('data-op-id');
+      const card = cards.find(c => c.id === cardId);
+      const op = card ? (card.operations || []).find(o => o.id === opId) : null;
+      if (!op || !card) return;
+      const value = (e.target.value || '').trim();
+      const prev = input.dataset.prevVal || '';
+      op.executor = value;
+      if (prev !== value) {
+        recordCardLog(card, { action: 'Исполнитель', object: opLogLabel(op), field: 'executor', targetId: op.id, oldValue: prev, newValue: value });
+        saveData();
+        renderDashboard();
+      }
     });
   });
 
@@ -2624,6 +2765,21 @@ function setupForms() {
     cardForm.addEventListener('submit', e => e.preventDefault());
   }
 
+  const cardQtyInput = document.getElementById('card-qty');
+  if (cardQtyInput) {
+    cardQtyInput.addEventListener('input', e => {
+      if (!activeCardDraft) return;
+      const raw = e.target.value.trim();
+      const qtyVal = raw === '' ? '' : Math.max(0, parseInt(raw, 10) || 0);
+      activeCardDraft.quantity = Number.isFinite(qtyVal) ? qtyVal : '';
+      if (!routeQtyManual) {
+        const qtyField = document.getElementById('route-qty');
+        if (qtyField) qtyField.value = activeCardDraft.quantity !== '' ? activeCardDraft.quantity : '';
+      }
+      renderRouteTableDraft();
+    });
+  }
+
   const saveBtn = document.getElementById('card-save-btn');
   if (saveBtn) {
     saveBtn.addEventListener('click', () => {
@@ -2677,10 +2833,33 @@ function setupForms() {
     document.getElementById('card-status-text').textContent = cardStatusText(activeCardDraft);
     renderRouteTableDraft();
     document.getElementById('route-form').reset();
+    routeQtyManual = false;
     const qtyField = document.getElementById('route-qty');
     if (qtyField) qtyField.value = activeCardDraft.quantity !== '' ? activeCardDraft.quantity : '';
     fillRouteSelectors();
   });
+
+  const routeQtyField = document.getElementById('route-qty');
+  if (routeQtyField) {
+    routeQtyField.addEventListener('input', e => {
+      const raw = e.target.value;
+      routeQtyManual = raw !== '';
+      if (raw !== '') {
+        e.target.value = toSafeCount(raw);
+      } else if (activeCardDraft) {
+        e.target.value = activeCardDraft.quantity !== '' ? activeCardDraft.quantity : '';
+      }
+    });
+  }
+
+  const opFilterInput = document.getElementById('route-op-filter');
+  const centerFilterInput = document.getElementById('route-center-filter');
+  if (opFilterInput) {
+    opFilterInput.addEventListener('input', () => fillRouteSelectors());
+  }
+  if (centerFilterInput) {
+    centerFilterInput.addEventListener('input', () => fillRouteSelectors());
+  }
 
   document.getElementById('center-form').addEventListener('submit', e => {
     e.preventDefault();
