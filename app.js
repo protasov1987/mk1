@@ -1905,6 +1905,51 @@ function renderRouteTableDraft() {
       renderRouteTableDraft();
     });
   });
+
+  wrapper.querySelectorAll('.route-code-input').forEach(input => {
+    input.addEventListener('blur', e => {
+      if (!activeCardDraft) return;
+      const ropId = input.getAttribute('data-rop-id');
+      const op = activeCardDraft.operations.find(o => o.id === ropId);
+      if (!op) return;
+      const prev = op.opCode || '';
+      const value = (e.target.value || '').trim();
+      if (!value) {
+        op.autoCode = true;
+      } else {
+        op.autoCode = false;
+        op.opCode = value;
+      }
+      renumberAutoCodesForCard(activeCardDraft);
+      if (prev !== op.opCode && !activeCardIsNew) {
+        recordCardLog(activeCardDraft, { action: 'Код операции', object: opLogLabel(op), field: 'opCode', targetId: op.id, oldValue: prev, newValue: op.opCode });
+      }
+      renderRouteTableDraft();
+    });
+  });
+
+  wrapper.querySelectorAll('.route-qty-input').forEach(input => {
+    input.addEventListener('input', e => {
+      e.target.value = toSafeCount(e.target.value);
+    });
+    input.addEventListener('blur', e => {
+      if (!activeCardDraft) return;
+      const ropId = input.getAttribute('data-rop-id');
+      const op = activeCardDraft.operations.find(o => o.id === ropId);
+      if (!op) return;
+      const prev = getOperationQuantity(op, activeCardDraft);
+      const raw = e.target.value;
+      if (raw === '') {
+        op.quantity = '';
+      } else {
+        op.quantity = toSafeCount(raw);
+      }
+      if (prev !== op.quantity && !activeCardIsNew) {
+        recordCardLog(activeCardDraft, { action: 'Количество изделий', object: opLogLabel(op), field: 'operationQuantity', targetId: op.id, oldValue: prev, newValue: op.quantity });
+      }
+      renderRouteTableDraft();
+    });
+  });
 }
 
 function moveRouteOpInDraft(ropId, delta) {
@@ -2891,6 +2936,15 @@ function setupForms() {
         e.target.value = activeCardDraft.quantity !== '' ? activeCardDraft.quantity : '';
       }
     });
+  }
+
+  const opFilterInput = document.getElementById('route-op-filter');
+  const centerFilterInput = document.getElementById('route-center-filter');
+  if (opFilterInput) {
+    opFilterInput.addEventListener('input', () => fillRouteSelectors());
+  }
+  if (centerFilterInput) {
+    centerFilterInput.addEventListener('input', () => fillRouteSelectors());
   }
 
   document.getElementById('center-form').addEventListener('submit', e => {
