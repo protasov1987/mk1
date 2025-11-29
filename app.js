@@ -160,6 +160,32 @@ function getOperationQuantity(op, card) {
   return '';
 }
 
+function sumItemCounts(items = []) {
+  return items.reduce((acc, item) => {
+    acc.good += toSafeCount(item && item.goodCount != null ? item.goodCount : 0);
+    acc.scrap += toSafeCount(item && item.scrapCount != null ? item.scrapCount : 0);
+    acc.hold += toSafeCount(item && item.holdCount != null ? item.holdCount : 0);
+    return acc;
+  }, { good: 0, scrap: 0, hold: 0 });
+}
+
+function buildItemsFromTemplate(template = [], qty = 0) {
+  const items = [];
+  const targetQty = Number.isFinite(qty) ? qty : 0;
+  for (let i = 0; i < targetQty; i++) {
+    const source = template[i] || {};
+    items.push({
+      id: source.id || genId('item'),
+      name: typeof source.name === 'string' ? source.name : '',
+      quantity: 1,
+      goodCount: 0,
+      scrapCount: 0,
+      holdCount: 0
+    });
+  }
+  return items;
+}
+
 function renumberAutoCodesForCard(card) {
   if (!card || !Array.isArray(card.operations)) return;
   const opsSorted = [...card.operations].sort((a, b) => (a.order || 0) - (b.order || 0));
@@ -170,6 +196,47 @@ function renumberAutoCodesForCard(card) {
       op.opCode = formatStepCode(autoIndex);
     }
   });
+}
+
+function normalizeOperationItems(card, op) {
+  if (!op || !card) return;
+  op.items = Array.isArray(op.items) ? op.items : [];
+  const useList = Boolean(card.useItemList);
+  const opQty = getOperationQuantity(op, card);
+  if (!useList) {
+    const totals = sumItemCounts(op.items);
+    op.goodCount = toSafeCount(op.goodCount || totals.good);
+    op.scrapCount = toSafeCount(op.scrapCount || totals.scrap);
+    op.holdCount = toSafeCount(op.holdCount || totals.hold);
+    op.items = op.items.map(item => ({
+      id: item.id || genId('item'),
+      name: typeof item.name === 'string' ? item.name : '',
+      quantity: 1,
+      goodCount: toSafeCount(item.goodCount || 0),
+      scrapCount: toSafeCount(item.scrapCount || 0),
+      holdCount: toSafeCount(item.holdCount || 0)
+    }));
+    return;
+  }
+
+  const targetQty = Number.isFinite(opQty) ? opQty : 0;
+  const normalized = [];
+  for (let i = 0; i < targetQty; i++) {
+    const source = op.items[i] || {};
+    normalized.push({
+      id: source.id || genId('item'),
+      name: typeof source.name === 'string' ? source.name : '',
+      quantity: 1,
+      goodCount: toSafeCount(source.goodCount || 0),
+      scrapCount: toSafeCount(source.scrapCount || 0),
+      holdCount: toSafeCount(source.holdCount || 0)
+    });
+  }
+  op.items = normalized;
+  const totals = sumItemCounts(normalized);
+  op.goodCount = totals.good;
+  op.scrapCount = totals.scrap;
+  op.holdCount = totals.hold;
 }
 
 function ensureAttachments(card) {
@@ -192,6 +259,7 @@ function ensureCardMeta(card, options = {}) {
   if (typeof card.drawing !== 'string') card.drawing = card.drawing ? String(card.drawing) : '';
   if (typeof card.material !== 'string') card.material = card.material ? String(card.material) : '';
   if (typeof card.contractNumber !== 'string') card.contractNumber = card.contractNumber ? String(card.contractNumber) : '';
+  card.useItemList = Boolean(card.useItemList);
   if (typeof card.createdAt !== 'number') {
     card.createdAt = Date.now();
   }
@@ -213,6 +281,7 @@ function ensureCardMeta(card, options = {}) {
     op.additionalExecutors = Array.isArray(op.additionalExecutors)
       ? op.additionalExecutors.map(name => (name || '').toString()).slice(0, 2)
       : [];
+    normalizeOperationItems(card, op);
   });
   renumberAutoCodesForCard(card);
 }
@@ -452,7 +521,7 @@ function setupBarcodeModal() {
 
 // === МОДЕЛЬ ОПЕРАЦИИ МАРШРУТА ===
 function createRouteOpFromRefs(op, center, executor, plannedMinutes, order, options = {}) {
-  const { code, autoCode = false, quantity } = options;
+  const { code, autoCode = false, quantity, items = [] } = options;
   return {
     id: genId('rop'),
     opId: op.id,
@@ -478,7 +547,8 @@ function createRouteOpFromRefs(op, center, executor, plannedMinutes, order, opti
     comment: '',
     goodCount: 0,
     scrapCount: 0,
-    holdCount: 0
+    holdCount: 0,
+    items
   };
 }
 
@@ -1009,6 +1079,7 @@ function duplicateCard(cardId) {
   copy.name = (card.name || '') + ' (копия)';
   copy.status = 'NOT_STARTED';
   copy.archived = false;
+  copy.useItemList = Boolean(card.useItemList);
   copy.logs = [];
   copy.createdAt = Date.now();
   copy.initialSnapshot = null;
@@ -1029,6 +1100,15 @@ function duplicateCard(cardId) {
     goodCount: 0,
     scrapCount: 0,
     holdCount: 0,
+    items: Array.isArray(op.items)
+      ? op.items.map(item => ({
+        ...item,
+        id: genId('item'),
+        goodCount: 0,
+        scrapCount: 0,
+        holdCount: 0
+      }))
+      : [],
     order: typeof op.order === 'number' ? op.order : idx + 1
   }));
   recalcCardStatus(copy);
@@ -1050,6 +1130,7 @@ function createEmptyCardDraft() {
     barcode: generateUniqueEAN13(),
     name: 'Новая карта',
     quantity: '',
+    useItemList: false,
     drawing: '',
     material: '',
     contractNumber: '',
@@ -1083,6 +1164,10 @@ function openCardModal(cardId) {
   document.getElementById('card-id').value = activeCardDraft.id;
   document.getElementById('card-name').value = activeCardDraft.name || '';
   document.getElementById('card-qty').value = activeCardDraft.quantity != null ? activeCardDraft.quantity : '';
+  const useItemsCheckbox = document.getElementById('card-use-items');
+  if (useItemsCheckbox) {
+    useItemsCheckbox.checked = Boolean(activeCardDraft.useItemList);
+  }
   document.getElementById('card-order').value = activeCardDraft.orderNo || '';
   document.getElementById('card-drawing').value = activeCardDraft.drawing || '';
   document.getElementById('card-material').value = activeCardDraft.material || '';
@@ -1123,6 +1208,7 @@ function closeCardModal() {
 function saveCardDraft() {
   if (!activeCardDraft) return;
   const draft = cloneCard(activeCardDraft);
+  draft.useItemList = Boolean(draft.useItemList);
   draft.operations = (draft.operations || []).map((op, idx) => ({
     ...op,
     order: typeof op.order === 'number' ? op.order : idx + 1,
@@ -1131,7 +1217,17 @@ function saveCardDraft() {
     holdCount: toSafeCount(op.holdCount || 0),
     quantity: getOperationQuantity(op, draft),
     autoCode: Boolean(op.autoCode),
-    additionalExecutors: Array.isArray(op.additionalExecutors) ? op.additionalExecutors.slice(0, 2) : []
+    additionalExecutors: Array.isArray(op.additionalExecutors) ? op.additionalExecutors.slice(0, 2) : [],
+    items: Array.isArray(op.items)
+      ? op.items.map(item => ({
+        id: item.id || genId('item'),
+        name: typeof item.name === 'string' ? item.name : '',
+        quantity: 1,
+        goodCount: toSafeCount(item.goodCount || 0),
+        scrapCount: toSafeCount(item.scrapCount || 0),
+        holdCount: toSafeCount(item.holdCount || 0)
+      }))
+      : []
   }));
   renumberAutoCodesForCard(draft);
   recalcCardStatus(draft);
@@ -1174,12 +1270,18 @@ function syncCardDraftFromForm() {
   activeCardDraft.material = document.getElementById('card-material').value.trim();
   activeCardDraft.contractNumber = document.getElementById('card-contract').value.trim();
   activeCardDraft.desc = document.getElementById('card-desc').value.trim();
+  const useItemsCheckbox = document.getElementById('card-use-items');
+  const prevUseList = Boolean(activeCardDraft.useItemList);
+  activeCardDraft.useItemList = useItemsCheckbox ? useItemsCheckbox.checked : false;
+  if (prevUseList !== activeCardDraft.useItemList && Array.isArray(activeCardDraft.operations)) {
+    activeCardDraft.operations.forEach(op => normalizeOperationItems(activeCardDraft, op));
+  }
 }
 
 function logCardDifferences(original, updated) {
   if (!original || !updated) return;
   const cardRef = updated;
-  const fields = ['name', 'orderNo', 'desc', 'quantity', 'drawing', 'material', 'contractNumber'];
+  const fields = ['name', 'orderNo', 'desc', 'quantity', 'drawing', 'material', 'contractNumber', 'useItemList'];
   fields.forEach(field => {
     if ((original[field] || '') !== (updated[field] || '')) {
       recordCardLog(cardRef, { action: 'Изменение поля', object: 'Карта', field, oldValue: original[field] || '', newValue: updated[field] || '' });
@@ -1531,6 +1633,7 @@ function buildSummaryTable(card) {
     '</tr></thead><tbody>';
 
   opsSorted.forEach((op, idx) => {
+    normalizeOperationItems(card, op);
     const rowId = card.id + '::' + op.id;
     const elapsed = getOperationElapsedSeconds(op);
     let timeCell = '';
@@ -1574,6 +1677,7 @@ function buildInitialSummaryTable(card) {
     '</tr></thead><tbody>';
 
   opsSorted.forEach((op, idx) => {
+    normalizeOperationItems(card, op);
     const executorCell = buildExecutorHistoryCell(card, op) || escapeHtml(op.executor || '');
 
     html += '<tr>' +
@@ -1584,6 +1688,8 @@ function buildInitialSummaryTable(card) {
       '<td>' + executorCell + '</td>' +
       '<td>' + (op.plannedMinutes || '') + '</td>' +
       '</tr>';
+
+    html += renderQuantityRow(card, op, { readonly: true, colspan: 6, blankForPrint: true });
   });
 
   html += '</tbody></table>';
@@ -1727,6 +1833,10 @@ function printSummaryTable() {
     .op-qty-row td { background: #f9fafb; }
     .qty-row-content { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .qty-row-content label { font-weight: 600; }
+    .items-row-content { display: flex; flex-wrap: wrap; gap: 8px; }
+    .item-block { border: 1px solid #d1d5db; padding: 6px; border-radius: 6px; background: #f3f4f6; min-width: 180px; }
+    .item-name { font-weight: 700; }
+    .item-chips { display: flex; flex-wrap: wrap; gap: 6px; }
     .barcode-print { display: flex; align-items: center; gap: 12px; margin: 8px 0; }
     .meta-print { margin: 2px 0; font-size: 13px; }
     .meta-stack { display: flex; flex-direction: column; gap: 2px; }
@@ -1783,6 +1893,10 @@ function printFullLog() {
     .op-qty-row td { background: #f9fafb; }
     .qty-row-content { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .qty-row-content label { font-weight: 600; }
+    .items-row-content { display: flex; flex-wrap: wrap; gap: 8px; }
+    .item-block { border: 1px solid #d1d5db; padding: 6px; border-radius: 6px; background: #f3f4f6; min-width: 180px; }
+    .item-name { font-weight: 700; }
+    .item-chips { display: flex; flex-wrap: wrap; gap: 6px; }
     .section-spacer { margin-top: 12px; }
   `;
   win.document.write('<html><head><title>История изменений</title><style>' + styles + '</style></head><body>');
@@ -1833,6 +1947,22 @@ function setupLogModal() {
 }
 
 // === МАРШРУТ КАРТЫ (ЧЕРЕЗ МОДАЛЬНОЕ ОКНО) ===
+function renderDraftItemsRow(op, colspan = 8) {
+  const items = Array.isArray(op.items) ? op.items : [];
+  const content = items.length
+    ? items.map((item, idx) => '<label class="item-name-field">' +
+        '<span class="item-name-index">' + (idx + 1) + '.</span>' +
+        '<input class="item-name-input" data-op-id="' + op.id + '" data-item-id="' + (item.id || '') + '" placeholder="Изделие ' + (idx + 1) + '" value="' + escapeHtml(item.name || '') + '">' +
+        '<span class="item-qty-tag">1 шт</span>' +
+      '</label>').join('')
+    : '<span class="items-empty">Укажите количество изделий для операции, чтобы задать их список.</span>';
+
+  return '<tr class="op-qty-row op-items-row"><td colspan="' + colspan + '">' +
+    '<div class="items-row-header">Список изделий</div>' +
+    '<div class="items-row-content editable">' + content + '</div>' +
+    '</td></tr>';
+}
+
 function renderRouteTableDraft() {
   const wrapper = document.getElementById('route-table-wrapper');
   if (!wrapper || !activeCardDraft) return;
@@ -1848,6 +1978,7 @@ function renderRouteTableDraft() {
     '<th>Порядок</th><th>Участок</th><th>Код операции</th><th>Операция</th><th>Кол-во изделий</th><th>План (мин)</th><th>Статус</th><th>Действия</th>' +
     '</tr></thead><tbody>';
   sortedOps.forEach((o, index) => {
+    normalizeOperationItems(activeCardDraft, o);
     html += '<tr data-rop-id="' + o.id + '">' +
       '<td>' + (index + 1) + '</td>' +
       '<td>' + escapeHtml(o.centerName) + '</td>' +
@@ -1862,6 +1993,10 @@ function renderRouteTableDraft() {
       '<button class="btn-small btn-danger" data-action="delete">Удалить</button>' +
       '</div></td>' +
       '</tr>';
+
+    if (activeCardDraft.useItemList) {
+      html += renderDraftItemsRow(o, 8);
+    }
   });
   html += '</tbody></table>';
   wrapper.innerHTML = html;
@@ -1922,6 +2057,7 @@ function renderRouteTableDraft() {
       } else {
         op.quantity = toSafeCount(raw);
       }
+      normalizeOperationItems(activeCardDraft, op);
       if (prev !== op.quantity && !activeCardIsNew) {
         recordCardLog(activeCardDraft, { action: 'Количество изделий', object: opLogLabel(op), field: 'operationQuantity', targetId: op.id, oldValue: prev, newValue: op.quantity });
       }
@@ -1929,48 +2065,21 @@ function renderRouteTableDraft() {
     });
   });
 
-  wrapper.querySelectorAll('.route-code-input').forEach(input => {
+  wrapper.querySelectorAll('.item-name-input').forEach(input => {
     input.addEventListener('blur', e => {
       if (!activeCardDraft) return;
-      const ropId = input.getAttribute('data-rop-id');
+      const ropId = input.getAttribute('data-op-id');
+      const itemId = input.getAttribute('data-item-id');
       const op = activeCardDraft.operations.find(o => o.id === ropId);
-      if (!op) return;
-      const prev = op.opCode || '';
+      if (!op || !Array.isArray(op.items)) return;
+      const item = op.items.find(it => it.id === itemId);
+      if (!item) return;
+      const prev = item.name || '';
       const value = (e.target.value || '').trim();
-      if (!value) {
-        op.autoCode = true;
-      } else {
-        op.autoCode = false;
-        op.opCode = value;
+      item.name = value;
+      if (prev !== value && !activeCardIsNew) {
+        recordCardLog(activeCardDraft, { action: 'Список изделий', object: opLogLabel(op), field: 'itemName', targetId: item.id, oldValue: prev, newValue: value });
       }
-      renumberAutoCodesForCard(activeCardDraft);
-      if (prev !== op.opCode && !activeCardIsNew) {
-        recordCardLog(activeCardDraft, { action: 'Код операции', object: opLogLabel(op), field: 'opCode', targetId: op.id, oldValue: prev, newValue: op.opCode });
-      }
-      renderRouteTableDraft();
-    });
-  });
-
-  wrapper.querySelectorAll('.route-qty-input').forEach(input => {
-    input.addEventListener('input', e => {
-      e.target.value = toSafeCount(e.target.value);
-    });
-    input.addEventListener('blur', e => {
-      if (!activeCardDraft) return;
-      const ropId = input.getAttribute('data-rop-id');
-      const op = activeCardDraft.operations.find(o => o.id === ropId);
-      if (!op) return;
-      const prev = getOperationQuantity(op, activeCardDraft);
-      const raw = e.target.value;
-      if (raw === '') {
-        op.quantity = '';
-      } else {
-        op.quantity = toSafeCount(raw);
-      }
-      if (prev !== op.quantity && !activeCardIsNew) {
-        recordCardLog(activeCardDraft, { action: 'Количество изделий', object: opLogLabel(op), field: 'operationQuantity', targetId: op.id, oldValue: prev, newValue: op.quantity });
-      }
-      renderRouteTableDraft();
     });
   });
 }
@@ -2161,6 +2270,7 @@ function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = fa
     '</tr></thead><tbody>';
 
   opsSorted.forEach((op, idx) => {
+    normalizeOperationItems(card, op);
     const rowId = card.id + '::' + op.id;
     const elapsed = getOperationElapsedSeconds(op);
     let timeCell = '';
@@ -2248,6 +2358,9 @@ function buildCardInfoBlock(card) {
 }
 
 function renderQuantityRow(card, op, { readonly = false, colspan = 9, blankForPrint = false } = {}) {
+  if (card && card.useItemList) {
+    return renderItemListRow(card, op, { readonly, colspan, blankForPrint });
+  }
   const opQty = getOperationQuantity(op, card);
   const totalLabel = opQty === '' ? '—' : opQty + ' шт';
   const base = '<span class="qty-total">Количество изделий: ' + escapeHtml(totalLabel) + '</span>';
@@ -2278,6 +2391,49 @@ function renderQuantityRow(card, op, { readonly = false, colspan = 9, blankForPr
     '<label>Брак <input type="number" class="qty-input" data-qty-type="scrap" data-card-id="' + card.id + '" data-op-id="' + op.id + '" min="0" value="' + scrapVal + '"></label>' +
     '<label>Задержано <input type="number" class="qty-input" data-qty-type="hold" data-card-id="' + card.id + '" data-op-id="' + op.id + '" min="0" value="' + holdVal + '"></label>' +
     '</div>' +
+    '</td></tr>';
+}
+
+function renderItemListRow(card, op, { readonly = false, colspan = 9, blankForPrint = false } = {}) {
+  const items = Array.isArray(op.items) ? op.items : [];
+  const lockRow = readonly || op.status === 'DONE';
+  const itemBlocks = items.length
+    ? items.map((item, idx) => {
+      const goodVal = item.goodCount != null ? item.goodCount : 0;
+      const scrapVal = item.scrapCount != null ? item.scrapCount : 0;
+      const holdVal = item.holdCount != null ? item.holdCount : 0;
+      const qtyVal = item.quantity != null ? toSafeCount(item.quantity) : 1;
+      if (lockRow) {
+        const goodText = blankForPrint ? '____' : escapeHtml(goodVal);
+        const scrapText = blankForPrint ? '____' : escapeHtml(scrapVal);
+        const holdText = blankForPrint ? '____' : escapeHtml(holdVal);
+        return '<div class="item-block readonly">' +
+          '<div class="item-name">' + escapeHtml(item.name || ('Изделие ' + (idx + 1))) + '</div>' +
+          '<div class="item-qty">' + escapeHtml(qtyVal) + ' шт</div>' +
+          '<div class="item-chips">' +
+          '<span class="qty-chip">Годные: ' + goodText + '</span>' +
+          '<span class="qty-chip">Брак: ' + scrapText + '</span>' +
+          '<span class="qty-chip">Задержано: ' + holdText + '</span>' +
+          '</div>' +
+          '</div>';
+      }
+
+      return '<div class="item-block" data-card-id="' + card.id + '" data-op-id="' + op.id + '" data-item-id="' + (item.id || '') + '">' +
+        '<div class="item-name">' + escapeHtml(item.name || ('Изделие ' + (idx + 1))) + '</div>' +
+        '<div class="item-qty">' + escapeHtml(qtyVal) + ' шт</div>' +
+        '<div class="item-inputs">' +
+        '<label>Годные <input type="number" class="item-status-input" data-qty-type="good" data-item-id="' + (item.id || '') + '" data-op-id="' + op.id + '" data-card-id="' + card.id + '" data-item-qty="' + qtyVal + '" min="0" value="' + goodVal + '"></label>' +
+        '<label>Брак <input type="number" class="item-status-input" data-qty-type="scrap" data-item-id="' + (item.id || '') + '" data-op-id="' + op.id + '" data-card-id="' + card.id + '" data-item-qty="' + qtyVal + '" min="0" value="' + scrapVal + '"></label>' +
+        '<label>Задержано <input type="number" class="item-status-input" data-qty-type="hold" data-item-id="' + (item.id || '') + '" data-op-id="' + op.id + '" data-card-id="' + card.id + '" data-item-qty="' + qtyVal + '" min="0" value="' + holdVal + '"></label>' +
+        '</div>' +
+        '</div>';
+    }).join('')
+    : '<span class="items-empty">Список изделий пуст</span>';
+
+  const cardId = card ? card.id : '';
+  return '<tr class="op-qty-row op-items-row" data-card-id="' + cardId + '" data-op-id="' + op.id + '"><td colspan="' + colspan + '">' +
+    '<div class="items-row-header">Список изделий</div>' +
+    '<div class="items-row-content">' + itemBlocks + '</div>' +
     '</td></tr>';
 }
 
@@ -2541,6 +2697,38 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
     });
   });
 
+  wrapper.querySelectorAll('.item-status-input').forEach(input => {
+    input.addEventListener('input', e => {
+      const maxVal = toSafeCount(input.getAttribute('data-item-qty'));
+      e.target.value = Math.min(maxVal, toSafeCount(e.target.value));
+    });
+
+    input.addEventListener('blur', e => {
+      const cardId = input.getAttribute('data-card-id');
+      const opId = input.getAttribute('data-op-id');
+      const itemId = input.getAttribute('data-item-id');
+      const type = input.getAttribute('data-qty-type');
+      const card = cards.find(c => c.id === cardId);
+      const op = card ? (card.operations || []).find(o => o.id === opId) : null;
+      if (!card || !op || !Array.isArray(op.items)) return;
+      const item = op.items.find(it => it.id === itemId);
+      if (!item) return;
+      const fieldMap = { good: 'goodCount', scrap: 'scrapCount', hold: 'holdCount' };
+      const field = fieldMap[type] || null;
+      if (!field) return;
+      const maxVal = item.quantity != null ? item.quantity : 1;
+      const val = Math.min(maxVal, toSafeCount(e.target.value));
+      const prev = toSafeCount(item[field] || 0);
+      if (prev === val) return;
+      item[field] = val;
+      normalizeOperationItems(card, op);
+      recordCardLog(card, { action: 'Количество изделия', object: opLogLabel(op), field: 'item.' + field, targetId: item.id, oldValue: prev, newValue: val });
+      saveData();
+      renderDashboard();
+      renderWorkordersTable();
+    });
+  });
+
   wrapper.querySelectorAll('.qty-input').forEach(input => {
     const cardId = input.getAttribute('data-card-id');
     const opId = input.getAttribute('data-op-id');
@@ -2620,7 +2808,18 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
           op.elapsedSeconds = (op.elapsedSeconds || 0) + diff;
         }
         const qtyTotal = getOperationQuantity(op, card);
-        if (qtyTotal > 0) {
+        if (card.useItemList) {
+          normalizeOperationItems(card, op);
+          const wrongItem = (op.items || []).find(item => {
+            const expected = item.quantity != null ? item.quantity : 1;
+            const total = toSafeCount(item.goodCount || 0) + toSafeCount(item.scrapCount || 0) + toSafeCount(item.holdCount || 0);
+            return expected > 0 && total !== expected;
+          });
+          if (wrongItem) {
+            alert('Количество по изделию "' + (wrongItem.name || 'Изделие') + '" не совпадает');
+            return;
+          }
+        } else if (qtyTotal > 0) {
           const sum = toSafeCount(op.goodCount || 0) + toSafeCount(op.scrapCount || 0) + toSafeCount(op.holdCount || 0);
           if (sum !== qtyTotal) {
             alert('Количество деталей не совпадает');
@@ -2874,6 +3073,21 @@ function setupForms() {
         const qtyField = document.getElementById('route-qty');
         if (qtyField) qtyField.value = activeCardDraft.quantity !== '' ? activeCardDraft.quantity : '';
       }
+      if (activeCardDraft.useItemList && Array.isArray(activeCardDraft.operations)) {
+        activeCardDraft.operations.forEach(op => normalizeOperationItems(activeCardDraft, op));
+      }
+      renderRouteTableDraft();
+    });
+  }
+
+  const useItemsCheckbox = document.getElementById('card-use-items');
+  if (useItemsCheckbox) {
+    useItemsCheckbox.addEventListener('change', e => {
+      if (!activeCardDraft) return;
+      activeCardDraft.useItemList = e.target.checked;
+      if (Array.isArray(activeCardDraft.operations)) {
+        activeCardDraft.operations.forEach(op => normalizeOperationItems(activeCardDraft, op));
+      }
       renderRouteTableDraft();
     });
   }
@@ -2919,6 +3133,15 @@ function setupForms() {
     const codeValue = document.getElementById('route-op-code').value.trim();
     const qtyInput = document.getElementById('route-qty').value.trim();
     const qtyValue = qtyInput === '' ? activeCardDraft.quantity : qtyInput;
+    const qtyNumeric = qtyValue === '' ? '' : toSafeCount(qtyValue);
+    const prevSameQtyOp = activeCardDraft.useItemList
+      ? [...(activeCardDraft.operations || [])]
+        .sort((a, b) => (b.order || 0) - (a.order || 0))
+        .find(o => getOperationQuantity(o, activeCardDraft) === qtyNumeric)
+      : null;
+    const items = activeCardDraft.useItemList
+      ? buildItemsFromTemplate(prevSameQtyOp ? prevSameQtyOp.items : [], qtyNumeric)
+      : [];
     let opRef = ops.find(o => o.id === opId);
     let centerRef = centers.find(c => c.id === centerId);
     const opTerm = (opInput ? opInput.value : '').trim().toLowerCase();
@@ -2939,10 +3162,12 @@ function setupForms() {
     const rop = createRouteOpFromRefs(opRef, centerRef, '', planned, maxOrder + 1, {
       code: codeValue,
       autoCode: !codeValue,
-      quantity: qtyValue
+      quantity: qtyValue,
+      items
     });
     activeCardDraft.operations = activeCardDraft.operations || [];
     activeCardDraft.operations.push(rop);
+    normalizeOperationItems(activeCardDraft, rop);
     renumberAutoCodesForCard(activeCardDraft);
     document.getElementById('card-status-text').textContent = cardStatusText(activeCardDraft);
     renderRouteTableDraft();
