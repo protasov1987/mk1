@@ -316,6 +316,11 @@ thead {
   margin-right: 4px;
 }
 
+.group-toggle-btn[data-opened="false"] {
+  background: #ede9fe;
+  color: #7c3aed;
+}
+
 .group-indent {
   padding-left: 20px;
   border-left: 3px solid #e5e7eb;
