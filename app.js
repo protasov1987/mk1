@@ -519,12 +519,6 @@ function setupBarcodeModal() {
     closeBtn.addEventListener('click', closeBarcodeModal);
   }
 
-  modal.addEventListener('click', (e) => {
-    if (e.target === modal) {
-      closeBarcodeModal();
-    }
-  });
-
   if (printBtn) {
     printBtn.addEventListener('click', () => {
       const canvas = document.getElementById('barcode-canvas');
@@ -1341,6 +1335,19 @@ function duplicateGroup(groupId, { includeArchivedChildren = false } = {}) {
   recalcCardStatus(newGroup);
   saveData();
   renderEverything();
+  return newGroup;
+}
+
+function openGroupTransferModal() {
+  const modal = document.getElementById('group-transfer-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+}
+
+function closeGroupTransferModal() {
+  const modal = document.getElementById('group-transfer-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
 }
 
 function deleteGroup(groupId) {
@@ -2233,11 +2240,6 @@ function setupLogModal() {
   }
   if (closeBottomBtn) {
     closeBottomBtn.addEventListener('click', () => closeLogModal());
-  }
-  if (modal) {
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) closeLogModal();
-    });
   }
   if (printBtn) {
     printBtn.addEventListener('click', () => printSummaryTable());
@@ -3378,7 +3380,10 @@ function renderArchiveTable() {
     btn.addEventListener('click', () => {
       const groupId = btn.getAttribute('data-group-id');
       if (groupId) {
-        duplicateGroup(groupId, { includeArchivedChildren: true });
+        const newGroup = duplicateGroup(groupId, { includeArchivedChildren: true });
+        if (newGroup) {
+          openGroupTransferModal();
+        }
         return;
       }
       const id = btn.getAttribute('data-card-id');
@@ -3497,11 +3502,6 @@ function setupCardsTabs() {
   const closeBtn = document.getElementById('directory-close');
   if (closeBtn) {
     closeBtn.addEventListener('click', () => closeDirectoryModal());
-  }
-  if (modal) {
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) closeDirectoryModal();
-    });
   }
 }
 
@@ -3838,6 +3838,13 @@ function renderEverything() {
   renderArchiveTable();
 }
 
+function setupGroupTransferModal() {
+  const closeBtn = document.getElementById('group-transfer-close');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => closeGroupTransferModal());
+  }
+}
+
 function setupAttachmentControls() {
   const modal = document.getElementById('attachments-modal');
   const closeBtn = document.getElementById('attachments-close');
@@ -3847,11 +3854,6 @@ function setupAttachmentControls() {
 
   if (closeBtn) {
     closeBtn.addEventListener('click', () => closeAttachmentsModal());
-  }
-  if (modal) {
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) closeAttachmentsModal();
-    });
   }
   if (addBtn && input) {
     addBtn.addEventListener('click', () => input.click());
@@ -3876,6 +3878,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupCardsTabs();
   setupForms();
   setupBarcodeModal();
+  setupGroupTransferModal();
   setupAttachmentControls();
   setupLogModal();
   renderEverything();

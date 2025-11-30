@@ -565,6 +565,15 @@ tbody tr:nth-child(even) {
   max-width: 720px;
 }
 
+.info-modal-content {
+  max-width: 460px;
+  text-align: center;
+}
+
+.info-modal-content .modal-body {
+  font-size: 16px;
+}
+
 .attachments-actions {
   display: flex;
   align-items: center;
