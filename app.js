@@ -484,7 +484,13 @@ function openBarcodeModal(card) {
   const modal = document.getElementById('barcode-modal');
   const canvas = document.getElementById('barcode-canvas');
   const codeSpan = document.getElementById('barcode-modal-code');
+  const title = document.getElementById('barcode-modal-title');
   if (!modal || !canvas || !codeSpan) return;
+
+  const isGroup = isGroupCard(card);
+  if (title) {
+    title.textContent = isGroup ? 'Штрихкод группы карт' : 'Штрихкод технологической карты';
+  }
 
   if (!card.barcode || !/^\d{13}$/.test(card.barcode)) {
     card.barcode = generateUniqueEAN13();
@@ -2534,6 +2540,7 @@ function buildWorkorderCardDetails(card, { opened = false, allowArchive = true, 
   const canArchive = allowArchive && card.status === 'DONE';
   const filesCount = (card.attachments || []).length;
   const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
+  const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-card-id="' + card.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
   const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
   const logButton = showLog ? ' <button type="button" class="btn-small btn-secondary log-btn" data-log-card="' + card.id + '">Log</button>' : '';
   const nameLabel = (card.groupId ? '<span class="group-marker">(Г)</span> ' : '') + escapeHtml(card.name || card.id);
@@ -2545,7 +2552,7 @@ function buildWorkorderCardDetails(card, { opened = false, allowArchive = true, 
     '<strong>' + nameLabel + '</strong>' +
     ' <span class="summary-sub">' +
     (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') + contractText +
-    filesButton + logButton +
+    barcodeButton + filesButton + logButton +
     '</span>' +
     '</div>' +
     '<div class="summary-actions">' +
@@ -2833,6 +2840,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
         : '';
       const filesCount = (card.attachments || []).length;
       const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
+      const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-card-id="' + card.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
       const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
       const childrenHtml = children.length
         ? children.map(child => buildWorkorderCardDetails(child, { opened: !collapseAll && workorderOpenCards.has(child.id), allowArchive: false })).join('')
@@ -2845,7 +2853,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
         '<strong><span class="group-marker">(Г)</span>' + escapeHtml(card.name || card.id) + '</strong>' +
         ' <span class="summary-sub">' +
         (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') + contractText +
-        filesButton +
+        barcodeButton + filesButton +
         '</span>' +
         '</div>' +
         '<div class="summary-actions">' +
@@ -2891,6 +2899,17 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       } else {
         workorderOpenCards.delete(cardId);
       }
+    });
+  });
+
+  wrapper.querySelectorAll('.barcode-view-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = btn.getAttribute('data-card-id');
+      const card = cards.find(c => c.id === id);
+      if (!card) return;
+      openBarcodeModal(card);
     });
   });
 
