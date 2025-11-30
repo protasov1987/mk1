@@ -73,6 +73,26 @@ function generateUniqueOpCode(used = new Set()) {
   return code;
 }
 
+function normalizeOpNameKey(name) {
+  return (name || '')
+    .toString()
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+function uniqueOpsByName(list = []) {
+  const seen = new Set();
+  const unique = [];
+  list.forEach(op => {
+    const key = normalizeOpNameKey(op && op.name);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    unique.push({ ...op, name: (op.name || '').trim().replace(/\s+/g, ' ') });
+  });
+  return unique;
+}
+
 function escapeHtml(str) {
   if (str == null) return '';
   return String(str)
@@ -820,6 +840,48 @@ function ensureOperationCodes() {
   });
 }
 
+function dedupeOpsDirectory() {
+  const seenByKey = new Map();
+  const aliasMap = new Map();
+  const deduped = [];
+
+  ops.forEach(op => {
+    const key = normalizeOpNameKey(op && op.name);
+    if (!key) return;
+    if (seenByKey.has(key)) {
+      aliasMap.set(op.id, seenByKey.get(key).id);
+      return;
+    }
+    const normalizedOp = { ...op, name: (op.name || '').trim().replace(/\s+/g, ' ') };
+    seenByKey.set(key, normalizedOp);
+    deduped.push(normalizedOp);
+  });
+
+  const opById = new Map(deduped.map(op => [op.id, op]));
+
+  if (aliasMap.size) {
+    cards = cards.map(card => {
+      const clonedCard = { ...card };
+      clonedCard.operations = (clonedCard.operations || []).map(op => {
+        const next = { ...op };
+        const mappedId = aliasMap.get(next.opId);
+        if (mappedId) {
+          next.opId = mappedId;
+        }
+        const canonical = opById.get(next.opId);
+        if (canonical) {
+          next.opName = next.opName || canonical.name;
+          next.opCode = next.opCode || canonical.code;
+        }
+        return next;
+      });
+      return clonedCard;
+    });
+  }
+
+  ops = deduped;
+}
+
 // === ХРАНИЛИЩЕ ===
 async function saveData() {
   try {
@@ -913,6 +975,7 @@ async function loadData() {
   }
 
   ensureDefaults();
+  dedupeOpsDirectory();
   ensureOperationCodes();
 
   cards.forEach(c => {
@@ -2400,7 +2463,8 @@ function fillRouteSelectors() {
   const opFilter = (opInput ? opInput.value : '').toLowerCase();
   const centerFilter = (centerInput ? centerInput.value : '').toLowerCase();
 
-  const filteredOps = ops.filter(o => {
+  const sourceOps = uniqueOpsByName(ops);
+  const filteredOps = sourceOps.filter(o => {
     if (!opFilter) return true;
     const label = formatOpLabel(o).toLowerCase();
     const desc = (o.desc || '').toLowerCase();
@@ -3738,10 +3802,16 @@ function setupForms() {
 
       document.getElementById('op-form').addEventListener('submit', e => {
         e.preventDefault();
-        const name = document.getElementById('op-name').value.trim();
+        const rawName = document.getElementById('op-name').value.trim();
+        const name = rawName.replace(/\s+/g, ' ');
         const desc = document.getElementById('op-desc').value.trim();
         const time = parseInt(document.getElementById('op-time').value, 10) || 30;
         if (!name) return;
+        const nameKey = normalizeOpNameKey(name);
+        if (ops.some(o => normalizeOpNameKey(o.name) === nameKey)) {
+          alert('Операция с таким названием уже есть в справочнике.');
+          return;
+        }
         const used = collectUsedOpCodes();
         const code = generateUniqueOpCode(used);
         ops.push({ id: genId('op'), code, name: name, desc: desc, recTime: time });
