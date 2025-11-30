@@ -16,8 +16,6 @@ let activeCardOriginalId = null;
 let activeCardIsNew = false;
 let cardsSearchTerm = '';
 let cardsContractTerm = '';
-let workorderContractTerm = '';
-let archiveContractTerm = '';
 let attachmentContext = null;
 let routeQtyManual = false;
 const ATTACH_ACCEPT = '.pdf,.doc,.docx,.jpg,.jpeg,.png,.zip,.rar,.7z';
@@ -694,12 +692,13 @@ function getCardProcessState(card) {
     if (!children.length) return { key: 'NOT_STARTED', label: 'Не запущено', className: 'not-started' };
     const childStates = children.map(c => getCardProcessState(c));
     const hasInProgress = childStates.some(s => s.key === 'IN_PROGRESS');
-    const hasPaused = childStates.some(s => s.key === 'PAUSED' || s.key === 'MIXED');
+    const hasPaused = childStates.some(s => s.key === 'PAUSED');
+    const hasMixed = childStates.some(s => s.key === 'MIXED');
     const allDone = childStates.length > 0 && childStates.every(s => s.key === 'DONE');
     const hasDone = childStates.some(s => s.key === 'DONE');
     const hasNotStarted = childStates.some(s => s.key === 'NOT_STARTED');
+    if (hasPaused || hasMixed) return { key: 'MIXED', label: 'Смешанно', className: 'mixed' };
     if (hasInProgress) return { key: 'IN_PROGRESS', label: 'Выполняется', className: 'in-progress' };
-    if (hasPaused) return { key: 'PAUSED', label: 'Пауза', className: 'paused' };
     if (allDone) return { key: 'DONE', label: 'Выполнено', className: 'done' };
     if (hasDone && hasNotStarted) return { key: 'MIXED', label: 'Смешанно', className: 'paused' };
     return { key: 'NOT_STARTED', label: 'Не запущена', className: 'not-started' };
@@ -947,11 +946,19 @@ async function loadData() {
 // === РЕНДЕРИНГ ДАШБОРДА ===
 function renderDashboard() {
   const statsContainer = document.getElementById('dashboard-stats');
-  const activeCards = cards.filter(c => !c.archived && !isGroupCard(c));
+  const activeCards = cards
+    .filter(c => !c.archived && !isGroupCard(c))
+    .filter(c => getCardProcessState(c).key !== 'NOT_STARTED');
+
   const cardsCount = activeCards.length;
-  const inWork = activeCards.filter(c => c.status === 'IN_PROGRESS').length;
-  const done = activeCards.filter(c => c.status === 'DONE').length;
-  const notStarted = cardsCount - inWork - done;
+  let inWork = 0;
+  let done = 0;
+  activeCards.forEach(card => {
+    const state = getCardProcessState(card);
+    if (state.key === 'DONE') done += 1;
+    else inWork += 1;
+  });
+  const notStarted = 0;
 
   statsContainer.innerHTML = '';
   const stats = [
@@ -1107,7 +1114,7 @@ function renderCardsTable() {
         '<td>' + opsTotal + '</td>' +
         '<td><button class="btn-small clip-btn" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button></td>' +
         '<td><div class="table-actions">' +
-        '<button class="btn-small" data-action="toggle-group" data-id="' + card.id + '">' + toggleLabel + '</button>' +
+        '<button class="btn-small group-toggle-btn" data-action="toggle-group" data-id="' + card.id + '" data-opened="' + opened + '">' + toggleLabel + '</button>' +
         '<button class="btn-small" data-action="print-group" data-id="' + card.id + '">Печать</button>' +
         '<button class="btn-small" data-action="copy-group" data-id="' + card.id + '">Копировать</button>' +
         '<button class="btn-small btn-danger" data-action="delete-group" data-id="' + card.id + '">Удалить</button>' +
@@ -2506,6 +2513,12 @@ function cardSearchScore(card, term) {
   if (card.name && card.name.toLowerCase().includes(t)) score += 50;
   if (card.orderNo && card.orderNo.toLowerCase().includes(t)) score += 50;
   if (card.contractNumber && card.contractNumber.toLowerCase().includes(t)) score += 50;
+  if (card.groupId) {
+    const parent = cards.find(c => c.id === card.groupId);
+    if (parent && parent.name && parent.name.toLowerCase().includes(t)) {
+      score += 40;
+    }
+  }
   return score;
 }
 
@@ -2734,7 +2747,6 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
   }
 
   const termRaw = workorderSearchTerm.trim();
-  const contractTerm = workorderContractTerm.trim().toLowerCase();
   const filteredByStatus = cardsWithOps.filter(card => {
     const state = getCardProcessState(card);
     return workorderStatusFilter === 'ALL' || state.key === workorderStatusFilter;
@@ -2758,26 +2770,22 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
     ? sortedCards.filter(card => cardSearchScore(card, termRaw) > 0)
     : sortedCards;
 
-  const filteredByContract = contractTerm
-    ? filteredBySearch.filter(card => (card.contractNumber || '').toLowerCase().includes(contractTerm))
-    : filteredBySearch;
-
-  if (!filteredByContract.length) {
+  if (!filteredBySearch.length) {
     wrapper.innerHTML = '<p>Карты по запросу не найдены.</p>';
     return;
   }
 
   let html = '';
-  filteredByContract.forEach(card => {
+  filteredBySearch.forEach(card => {
     const opened = !collapseAll && workorderOpenCards.has(card.id);
     const stateBadge = renderCardStateBadge(card);
     const missingBadge = cardHasMissingExecutors(card)
       ? '<span class="status-pill status-pill-missing-executor" title="Есть операции без исполнителя">Нет исполнителя</span>'
       : '';
-    const canArchive = card.status === 'DONE';
+    const canArchive = card.status === 'DONE' && !card.groupId;
     const filesCount = (card.attachments || []).length;
     const barcodeInline = card.barcode
-      ? ' • № карты: <span class="summary-barcode">' + escapeHtml(card.barcode) + ' <button type="button" class="btn-small btn-secondary wo-barcode-btn" data-card-id="' + card.id + '">Штрихкод</button></span>'
+      ? ' • <button type="button" class="btn-small btn-secondary wo-barcode-btn" data-card-id="' + card.id + '">Штрихкод</button>'
       : '';
     const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
     const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
@@ -2855,6 +2863,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       const id = btn.getAttribute('data-card-id');
       const card = cards.find(c => c.id === id);
       if (!card) return;
+      if (card.groupId) return;
       if (!card.archived) {
         recordCardLog(card, { action: 'Архивирование', object: 'Карта', field: 'archived', oldValue: false, newValue: true });
       }
@@ -3143,7 +3152,6 @@ function renderArchiveTable() {
   }
 
   const termRaw = archiveSearchTerm.trim();
-  const contractTerm = archiveContractTerm.trim().toLowerCase();
   const filteredByStatus = archivedCards.filter(card => {
     const state = getCardProcessState(card);
     return archiveStatusFilter === 'ALL' || state.key === archiveStatusFilter;
@@ -3163,17 +3171,13 @@ function renderArchiveTable() {
     ? sortedCards.filter(card => cardSearchScore(card, termRaw) > 0)
     : sortedCards;
 
-  const filteredByContract = contractTerm
-    ? filteredBySearch.filter(card => (card.contractNumber || '').toLowerCase().includes(contractTerm))
-    : filteredBySearch;
-
-  if (!filteredByContract.length) {
+  if (!filteredBySearch.length) {
     wrapper.innerHTML = '<p>Архивные карты по запросу не найдены.</p>';
     return;
   }
 
   let html = '';
-  filteredByContract.forEach(card => {
+  filteredBySearch.forEach(card => {
     const stateBadge = renderCardStateBadge(card);
     const filesCount = (card.attachments || []).length;
     const barcodeInline = card.barcode
@@ -3617,7 +3621,6 @@ function setupForms() {
   const searchInput = document.getElementById('workorder-search');
   const searchClearBtn = document.getElementById('workorder-search-clear');
   const statusSelect = document.getElementById('workorder-status');
-  const contractInput = document.getElementById('workorder-contract');
   const missingExecutorSelect = document.getElementById('workorder-missing-executor');
   if (searchInput) {
     searchInput.addEventListener('input', e => {
@@ -3625,18 +3628,10 @@ function setupForms() {
       renderWorkordersTable({ collapseAll: true });
     });
   }
-  if (contractInput) {
-    contractInput.addEventListener('input', e => {
-      workorderContractTerm = e.target.value || '';
-      renderWorkordersTable({ collapseAll: true });
-    });
-  }
   if (searchClearBtn) {
     searchClearBtn.addEventListener('click', () => {
       workorderSearchTerm = '';
       if (searchInput) searchInput.value = '';
-      workorderContractTerm = '';
-      if (contractInput) contractInput.value = '';
       if (statusSelect) statusSelect.value = 'ALL';
       workorderStatusFilter = 'ALL';
       workorderMissingExecutorFilter = 'ALL';
@@ -3662,16 +3657,9 @@ function setupForms() {
   const archiveSearchInput = document.getElementById('archive-search');
   const archiveSearchClear = document.getElementById('archive-search-clear');
   const archiveStatusSelect = document.getElementById('archive-status');
-  const archiveContractInput = document.getElementById('archive-contract');
   if (archiveSearchInput) {
     archiveSearchInput.addEventListener('input', e => {
       archiveSearchTerm = e.target.value || '';
-      renderArchiveTable();
-    });
-  }
-  if (archiveContractInput) {
-    archiveContractInput.addEventListener('input', e => {
-      archiveContractTerm = e.target.value || '';
       renderArchiveTable();
     });
   }
@@ -3685,8 +3673,6 @@ function setupForms() {
     archiveSearchClear.addEventListener('click', () => {
       archiveSearchTerm = '';
       if (archiveSearchInput) archiveSearchInput.value = '';
-      archiveContractTerm = '';
-      if (archiveContractInput) archiveContractInput.value = '';
       archiveStatusFilter = 'ALL';
       if (archiveStatusSelect) archiveStatusSelect.value = 'ALL';
       renderArchiveTable();
