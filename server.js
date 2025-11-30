@@ -73,6 +73,56 @@ function generateUniqueOpCode(used = new Set()) {
   return code;
 }
 
+function normalizeOpNameKey(name) {
+  return (name || '')
+    .toString()
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+function dedupeOperations(data) {
+  const unique = [];
+  const aliasMap = new Map();
+  const seenByKey = new Map();
+
+  (data.ops || []).forEach(op => {
+    const key = normalizeOpNameKey(op && op.name);
+    if (!key) return;
+    if (seenByKey.has(key)) {
+      aliasMap.set(op.id, seenByKey.get(key).id);
+      return;
+    }
+    const normalizedOp = { ...op, name: (op.name || '').trim().replace(/\s+/g, ' ') };
+    seenByKey.set(key, normalizedOp);
+    unique.push(normalizedOp);
+  });
+
+  const opById = new Map(unique.map(op => [op.id, op]));
+
+  if (aliasMap.size) {
+    data.cards = (data.cards || []).map(card => {
+      const nextCard = { ...card };
+      nextCard.operations = (nextCard.operations || []).map(op => {
+        const nextOp = { ...op };
+        const mappedId = aliasMap.get(nextOp.opId);
+        if (mappedId) {
+          nextOp.opId = mappedId;
+        }
+        const canonical = opById.get(nextOp.opId);
+        if (canonical) {
+          nextOp.opName = nextOp.opName || canonical.name;
+          nextOp.opCode = nextOp.opCode || canonical.code;
+        }
+        return nextOp;
+      });
+      return nextCard;
+    });
+  }
+
+  data.ops = unique;
+}
+
 function createRouteOpFromRefs(op, center, executor, plannedMinutes, order, options = {}) {
   const { quantity = '', autoCode = false, code } = options;
   return {
@@ -325,6 +375,7 @@ function normalizeData(payload) {
     ops: Array.isArray(payload.ops) ? payload.ops : [],
     centers: Array.isArray(payload.centers) ? payload.centers : []
   };
+  dedupeOperations(safe);
   ensureOperationCodes(safe);
   safe.cards = safe.cards.map(card => {
     if (!card.barcode || !/^\d{13}$/.test(card.barcode)) {
@@ -498,6 +549,7 @@ async function requestHandler(req, res) {
 
 async function startServer() {
   await database.init(buildDefaultData);
+  await database.update(data => normalizeData(data));
   const server = http.createServer((req, res) => {
     requestHandler(req, res).catch(err => {
       // eslint-disable-next-line no-console
