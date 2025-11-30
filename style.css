@@ -283,6 +283,12 @@ textarea {
   font-size: 12px;
 }
 
+.group-toggle-btn {
+  background: #ede9fe;
+  color: #7c3aed;
+  border: 1px solid #c4b5fd;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
