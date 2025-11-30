@@ -2736,8 +2736,11 @@ function renderItemListRow(card, op, { readonly = false, colspan = 9, blankForPr
 
 function renderWorkordersTable({ collapseAll = false } = {}) {
   const wrapper = document.getElementById('workorders-table-wrapper');
-  const cardsWithOps = cards.filter(c => !c.archived && c.operations && c.operations.length);
-  if (!cardsWithOps.length) {
+  const groups = cards.filter(c => !c.archived && isGroupCard(c));
+  const ungroupedCards = cards.filter(c => !c.archived && !c.groupId && c.operations && c.operations.length);
+  const groupedChildren = cards.filter(c => !c.archived && c.groupId && c.operations && c.operations.length);
+  const hasData = groups.length > 0 || ungroupedCards.length > 0 || groupedChildren.length > 0;
+  if (!hasData) {
     wrapper.innerHTML = '<p>Маршрутных операций пока нет.</p>';
     return;
   }
@@ -2747,42 +2750,20 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
   }
 
   const termRaw = workorderSearchTerm.trim();
-  const filteredByStatus = cardsWithOps.filter(card => {
+  const cardPassesFilters = (card) => {
     const state = getCardProcessState(card);
-    return workorderStatusFilter === 'ALL' || state.key === workorderStatusFilter;
-  });
+    if (workorderStatusFilter !== 'ALL' && state.key !== workorderStatusFilter) return false;
+    if (workorderMissingExecutorFilter === 'NO_EXECUTOR' && !cardHasMissingExecutors(card)) return false;
+    if (termRaw && cardSearchScore(card, termRaw) <= 0) return false;
+    return true;
+  };
 
-  const filteredByMissingExecutor = workorderMissingExecutorFilter === 'NO_EXECUTOR'
-    ? filteredByStatus.filter(card => cardHasMissingExecutors(card))
-    : filteredByStatus;
-
-  if (!filteredByMissingExecutor.length) {
-    wrapper.innerHTML = '<p>Нет карт, подходящих под выбранный фильтр.</p>';
-    return;
-  }
-
-  let sortedCards = [...filteredByMissingExecutor];
-  if (termRaw) {
-    sortedCards.sort((a, b) => cardSearchScore(b, termRaw) - cardSearchScore(a, termRaw));
-  }
-
-  const filteredBySearch = termRaw
-    ? sortedCards.filter(card => cardSearchScore(card, termRaw) > 0)
-    : sortedCards;
-
-  if (!filteredBySearch.length) {
-    wrapper.innerHTML = '<p>Карты по запросу не найдены.</p>';
-    return;
-  }
-
-  let html = '';
-  filteredBySearch.forEach(card => {
-    const opened = !collapseAll && workorderOpenCards.has(card.id);
+  const renderCardDetails = (card, { opened = false, isChild = false } = {}) => {
     const stateBadge = renderCardStateBadge(card);
     const missingBadge = cardHasMissingExecutors(card)
       ? '<span class="status-pill status-pill-missing-executor" title="Есть операции без исполнителя">Нет исполнителя</span>'
       : '';
-    const canArchive = card.status === 'DONE' && !card.groupId;
+    const canArchive = !card.groupId && !isGroupCard(card) && card.status === 'DONE';
     const filesCount = (card.attachments || []).length;
     const barcodeInline = card.barcode
       ? ' • <button type="button" class="btn-small btn-secondary wo-barcode-btn" data-card-id="' + card.id + '">Штрихкод</button>'
@@ -2791,8 +2772,10 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
     const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
     const logButton = ' <button type="button" class="btn-small btn-secondary log-btn" data-log-card="' + card.id + '">Log</button>';
     const nameLabel = (card.groupId ? '<span class="group-marker">(Г)</span> ' : '') + escapeHtml(card.name || card.id);
+    const classes = ['wo-card'];
+    if (isChild) classes.push('wo-subcard');
 
-    html += '<details class="wo-card" data-card-id="' + card.id + '"' + (opened ? ' open' : '') + '>' +
+    let html = '<details class="' + classes.join(' ') + '" data-card-id="' + card.id + '"' + (opened ? ' open' : '') + '>' +
       '<summary>' +
       '<div class="summary-line">' +
       '<div class="summary-text">' +
@@ -2812,8 +2795,98 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
     html += buildCardInfoBlock(card);
     html += buildOperationsTable(card, { readonly: false, showQuantityColumn: false });
     html += '</details>';
-  });
+    return html;
+  };
 
+  const renderGroupBlock = (group) => {
+    const opened = !collapseAll && workorderOpenCards.has(group.id);
+    const children = getGroupChildren(group).filter(c => !c.archived && c.operations && c.operations.length);
+    const filteredChildren = children.filter(cardPassesFilters);
+    const groupState = getCardProcessState(group);
+    const matchesStatus = workorderStatusFilter === 'ALL'
+      || groupState.key === workorderStatusFilter
+      || filteredChildren.length > 0;
+    const matchesMissing = workorderMissingExecutorFilter !== 'NO_EXECUTOR' || children.some(cardHasMissingExecutors);
+    const hasSearchHit = termRaw ? (cardSearchScore(group, termRaw) > 0 || filteredChildren.length > 0) : true;
+    const displayChildren = termRaw ? filteredChildren : filteredChildren.length ? filteredChildren : children.filter(cardPassesFilters);
+
+    if (!children.length) return '';
+    if (!matchesStatus || !matchesMissing || !hasSearchHit) return '';
+    if (!displayChildren.length && termRaw) return '';
+
+    const stateBadge = renderCardStateBadge(group);
+    const filesCount = (group.attachments || []).length;
+    const barcodeInline = group.barcode
+      ? ' • <button type="button" class="btn-small btn-secondary wo-barcode-btn" data-card-id="' + group.id + '">Штрихкод</button>'
+      : '';
+    const contractText = group.contractNumber ? ' (Договор: ' + escapeHtml(group.contractNumber) + ')' : '';
+    const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + group.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
+    const logButton = ' <button type="button" class="btn-small btn-secondary log-btn" data-log-card="' + group.id + '">Log</button>';
+    const canArchiveGroup = groupState.key === 'DONE';
+
+    let html = '<details class="wo-card wo-group" data-card-id="' + group.id + '"' + (opened ? ' open' : '') + '>' +
+      '<summary>' +
+      '<div class="summary-line">' +
+      '<div class="summary-text">' +
+      '<strong><span class="group-marker">(Г)</span> ' + escapeHtml(group.name || group.id) + '</strong>' +
+      ' <span class="summary-sub">' +
+      (group.orderNo ? ' (Заказ: ' + escapeHtml(group.orderNo) + ')' : '') + contractText +
+      barcodeInline + filesButton + logButton +
+      '</span>' +
+      '</div>' +
+      '<div class="summary-actions">' + stateBadge +
+      (canArchiveGroup ? ' <button type="button" class="btn-small btn-secondary archive-move-btn" data-card-id="' + group.id + '">Перенести в архив</button>' : '') +
+      '</div>' +
+      '</div>' +
+      '</summary>' +
+      '<div class="group-children">';
+
+    displayChildren.forEach(child => {
+      const childOpened = !collapseAll && workorderOpenCards.has(child.id);
+      html += renderCardDetails(child, { opened: childOpened, isChild: true });
+    });
+
+    if (!displayChildren.length) {
+      html += '<p class="muted">Нет карт, подходящих под выбранный фильтр.</p>';
+    }
+
+    html += '</div></details>';
+    return html;
+  };
+
+  const groupOrder = [...groups];
+  if (termRaw) {
+    groupOrder.sort((a, b) => {
+      const childrenA = getGroupChildren(a).filter(c => !c.archived);
+      const childrenB = getGroupChildren(b).filter(c => !c.archived);
+      const bestA = Math.max(cardSearchScore(a, termRaw), ...childrenA.map(ch => cardSearchScore(ch, termRaw)), 0);
+      const bestB = Math.max(cardSearchScore(b, termRaw), ...childrenB.map(ch => cardSearchScore(ch, termRaw)), 0);
+      return bestB - bestA;
+    });
+  }
+
+  const visibleGroups = groupOrder
+    .map(renderGroupBlock)
+    .filter(Boolean);
+
+  const visibleUngrouped = ungroupedCards
+    .filter(cardPassesFilters)
+    .sort((a, b) => {
+      if (!termRaw) return 0;
+      return cardSearchScore(b, termRaw) - cardSearchScore(a, termRaw);
+    })
+    .map(card => {
+      const opened = !collapseAll && workorderOpenCards.has(card.id);
+      return renderCardDetails(card, { opened });
+    });
+
+  const hasVisible = visibleGroups.length || visibleUngrouped.length;
+  if (!hasVisible) {
+    wrapper.innerHTML = '<p>Карты по запросу не найдены.</p>';
+    return;
+  }
+
+  let html = visibleGroups.join('') + visibleUngrouped.join('');
   wrapper.innerHTML = html;
 
   wrapper.querySelectorAll('.wo-card').forEach(detail => {
@@ -2863,11 +2936,25 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       const id = btn.getAttribute('data-card-id');
       const card = cards.find(c => c.id === id);
       if (!card) return;
-      if (card.groupId) return;
-      if (!card.archived) {
-        recordCardLog(card, { action: 'Архивирование', object: 'Карта', field: 'archived', oldValue: false, newValue: true });
+      if (isGroupCard(card)) {
+        const children = getGroupChildren(card);
+        children.forEach(child => {
+          if (!child.archived) {
+            recordCardLog(child, { action: 'Архивирование', object: 'Карта', field: 'archived', oldValue: false, newValue: true });
+          }
+          child.archived = true;
+        });
+        if (!card.archived) {
+          recordCardLog(card, { action: 'Архивирование', object: 'Группа', field: 'archived', oldValue: false, newValue: true });
+        }
+        card.archived = true;
+      } else {
+        if (card.groupId) return;
+        if (!card.archived) {
+          recordCardLog(card, { action: 'Архивирование', object: 'Карта', field: 'archived', oldValue: false, newValue: true });
+        }
+        card.archived = true;
       }
-      card.archived = true;
       saveData();
       renderEverything();
     });

@@ -789,6 +789,20 @@ footer {
   border: 0;
 }
 
+.wo-group {
+  border-color: #c7b4f3;
+}
+
+.wo-group .group-children {
+  margin-top: 8px;
+  padding-left: 12px;
+  border-left: 2px solid #c7b4f3;
+}
+
+.wo-card.wo-subcard {
+  margin-left: 8px;
+}
+
 .summary-line {
   display: flex;
   align-items: center;
