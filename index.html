@@ -70,14 +70,10 @@
         <h2>Трекер</h2>
 
         <!-- Поиск -->
-        <div class="flex" style="margin-bottom:8px; align-items:flex-end;">
+        <div class="flex" style="margin-bottom:8px; align-items:flex-end; flex-wrap:wrap; gap:8px;">
           <div class="flex-col" style="flex:1 1 260px;">
-            <label for="workorder-search">Поиск техкарты (№ карты, название, заказ)</label>
-            <input id="workorder-search" placeholder="Введите № EAN-13, название или номер заказа" />
-          </div>
-          <div class="flex-col" style="flex:0 1 200px;">
-            <label for="workorder-contract">Номер договора</label>
-            <input id="workorder-contract" placeholder="Введите номер договора" />
+            <label for="workorder-search">Поиск техкарты или группы</label>
+            <input id="workorder-search" placeholder="Введите № EAN-13, название, номер заказа или группы, номер договора" />
           </div>
           <div class="flex-col" style="flex:0 1 200px;">
             <label for="workorder-status">Статус карты</label>
@@ -114,14 +110,10 @@
     <section id="archive">
       <div class="card">
         <h2>Архив маршрутных карт</h2>
-        <div class="flex" style="margin-bottom:8px; align-items:flex-end;">
+        <div class="flex" style="margin-bottom:8px; align-items:flex-end; flex-wrap:wrap; gap:8px;">
           <div class="flex-col" style="flex:1 1 260px;">
-            <label for="archive-search">Поиск в архиве (№ карты, название, заказ)</label>
-            <input id="archive-search" placeholder="Введите № EAN-13, название или номер заказа" />
-          </div>
-          <div class="flex-col" style="flex:0 1 200px;">
-            <label for="archive-contract">Номер договора</label>
-            <input id="archive-contract" placeholder="Введите номер договора" />
+            <label for="archive-search">Поиск в архиве (№ карты, название, заказ, договор)</label>
+            <input id="archive-search" placeholder="Введите № EAN-13, название, номер заказа, группы или договора" />
           </div>
           <div class="flex-col" style="flex:0 1 200px;">
             <label for="archive-status">Статус карты</label>
