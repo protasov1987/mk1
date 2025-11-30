@@ -1616,9 +1616,15 @@ function saveCardDraft() {
       cards[idx] = draft;
     }
   }
-  saveData();
-  renderEverything();
-  closeCardModal();
+  try {
+    saveData();
+    renderEverything();
+  } catch (err) {
+    console.error('Не удалось сохранить карту', err);
+    alert('Не удалось сохранить карту: ' + (err && err.message ? err.message : err));
+  } finally {
+    closeCardModal();
+  }
 }
 
 function syncCardDraftFromForm() {
@@ -2812,7 +2818,7 @@ function renderItemListRow(card, op, { readonly = false, colspan = 9, blankForPr
 
 function renderWorkordersTable({ collapseAll = false } = {}) {
   const wrapper = document.getElementById('workorders-table-wrapper');
-  const rootCards = cards.filter(c => !c.archived && !c.groupId && (isGroupCard(c) || (c.operations && c.operations.length)));
+  const rootCards = cards.filter(c => !c.archived && !c.groupId);
   if (!rootCards.length) {
     wrapper.innerHTML = '<p>Маршрутных операций пока нет.</p>';
     return;
