@@ -376,8 +376,10 @@
   <!-- Модальное окно для штрихкода -->
   <div id="barcode-modal" class="barcode-modal">
     <div class="barcode-modal-content">
-      <h3>Штрихкод технологической карты</h3>
-      <p style="font-size:12px; color:#6b7280; margin-top:0;">Формат EAN-13</p>
+      <div class="barcode-modal-header">
+        <h3 id="barcode-modal-title">Штрихкод</h3>
+        <p class="barcode-modal-hint">Формат EAN-13</p>
+      </div>
       <canvas id="barcode-canvas"></canvas>
       <div style="margin-top:8px; font-size:14px;">
         Код: <span id="barcode-modal-code"></span>
