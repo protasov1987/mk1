@@ -11,13 +11,12 @@ let archiveSearchTerm = '';
 let archiveStatusFilter = 'ALL';
 let apiOnline = false;
 const workorderOpenCards = new Set();
+const workorderOpenGroups = new Set();
 let activeCardDraft = null;
 let activeCardOriginalId = null;
 let activeCardIsNew = false;
 let cardsSearchTerm = '';
 let cardsContractTerm = '';
-let workorderContractTerm = '';
-let archiveContractTerm = '';
 let attachmentContext = null;
 let routeQtyManual = false;
 const ATTACH_ACCEPT = '.pdf,.doc,.docx,.jpg,.jpeg,.png,.zip,.rar,.7z';
@@ -632,10 +631,12 @@ function cardStatusText(card) {
     if (!children.length) return 'Не запущена';
     const anyInProgress = children.some(c => c.status === 'IN_PROGRESS');
     const anyPaused = children.some(c => c.status === 'PAUSED');
+    const anyPausedOp = children.some(ch => (ch.operations || []).some(op => op.status === 'PAUSED'));
     const allDone = children.length > 0 && children.every(c => c.status === 'DONE');
     const anyDone = children.some(c => c.status === 'DONE');
     const anyNotStarted = children.some(c => c.status === 'NOT_STARTED' || !c.status);
 
+    if (anyPausedOp) return 'Смешанно';
     if (anyInProgress) return 'Выполняется';
     if (anyPaused) return 'Пауза';
     if (allDone) return 'Завершена';
@@ -693,15 +694,17 @@ function getCardProcessState(card) {
     const children = getGroupChildren(card).filter(c => !c.archived);
     if (!children.length) return { key: 'NOT_STARTED', label: 'Не запущено', className: 'not-started' };
     const childStates = children.map(c => getCardProcessState(c));
+    const hasPausedOp = children.some(ch => (ch.operations || []).some(op => op.status === 'PAUSED'));
     const hasInProgress = childStates.some(s => s.key === 'IN_PROGRESS');
     const hasPaused = childStates.some(s => s.key === 'PAUSED' || s.key === 'MIXED');
     const allDone = childStates.length > 0 && childStates.every(s => s.key === 'DONE');
     const hasDone = childStates.some(s => s.key === 'DONE');
     const hasNotStarted = childStates.some(s => s.key === 'NOT_STARTED');
+    if (allDone) return { key: 'DONE', label: 'Выполнено', className: 'done' };
+    if (hasPausedOp) return { key: 'MIXED', label: 'Смешанно', className: 'mixed' };
     if (hasInProgress) return { key: 'IN_PROGRESS', label: 'Выполняется', className: 'in-progress' };
     if (hasPaused) return { key: 'PAUSED', label: 'Пауза', className: 'paused' };
-    if (allDone) return { key: 'DONE', label: 'Выполнено', className: 'done' };
-    if (hasDone && hasNotStarted) return { key: 'MIXED', label: 'Смешанно', className: 'paused' };
+    if (hasDone && hasNotStarted) return { key: 'MIXED', label: 'Смешанно', className: 'mixed' };
     return { key: 'NOT_STARTED', label: 'Не запущена', className: 'not-started' };
   }
   const opsArr = card.operations || [];
@@ -731,6 +734,12 @@ function cardHasMissingExecutors(card) {
       : false;
     return mainMissing || additionalMissing;
   });
+}
+
+function groupHasMissingExecutors(group) {
+  if (!isGroupCard(group)) return false;
+  const children = getGroupChildren(group).filter(c => !c.archived);
+  return children.some(cardHasMissingExecutors);
 }
 
 function renderCardStateBadge(card) {
@@ -968,16 +977,15 @@ function renderDashboard() {
   });
 
   const dashTableWrapper = document.getElementById('dashboard-cards');
-  const eligibleCards = activeCards;
+  const eligibleCards = activeCards.filter(c => c.status !== 'NOT_STARTED');
   if (!eligibleCards.length) {
     dashTableWrapper.innerHTML = '<p>Карт для отображения пока нет.</p>';
     return;
   }
 
-  const limited = eligibleCards.slice(0, 5);
   let html = '<table><thead><tr><th>№ карты (EAN-13)</th><th>Наименование</th><th>Заказ</th><th>Статус / операции</th><th>Сделано деталей</th><th>Выполнено операций</th><th>Комментарии</th></tr></thead><tbody>';
 
-  limited.forEach(card => {
+  eligibleCards.forEach(card => {
     const opsArr = card.operations || [];
     const activeOps = opsArr.filter(o => o.status === 'IN_PROGRESS' || o.status === 'PAUSED');
     let statusHtml = '';
@@ -1107,7 +1115,7 @@ function renderCardsTable() {
         '<td>' + opsTotal + '</td>' +
         '<td><button class="btn-small clip-btn" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button></td>' +
         '<td><div class="table-actions">' +
-        '<button class="btn-small" data-action="toggle-group" data-id="' + card.id + '">' + toggleLabel + '</button>' +
+        '<button class="btn-small group-toggle-btn" data-action="toggle-group" data-id="' + card.id + '">' + toggleLabel + '</button>' +
         '<button class="btn-small" data-action="print-group" data-id="' + card.id + '">Печать</button>' +
         '<button class="btn-small" data-action="copy-group" data-id="' + card.id + '">Копировать</button>' +
         '<button class="btn-small btn-danger" data-action="delete-group" data-id="' + card.id + '">Удалить</button>' +
@@ -2509,6 +2517,50 @@ function cardSearchScore(card, term) {
   return score;
 }
 
+function cardSearchScoreWithChildren(card, term) {
+  if (!term) return 0;
+  const selfScore = cardSearchScore(card, term);
+  if (!isGroupCard(card)) return selfScore;
+  const children = getGroupChildren(card).filter(c => !c.archived);
+  const childScore = children.reduce((max, child) => Math.max(max, cardSearchScore(child, term)), 0);
+  return Math.max(selfScore, childScore);
+}
+
+function buildWorkorderCardDetails(card, { opened = false, allowArchive = true, showLog = true } = {}) {
+  const stateBadge = renderCardStateBadge(card);
+  const missingBadge = cardHasMissingExecutors(card)
+    ? '<span class="status-pill status-pill-missing-executor" title="Есть операции без исполнителя">Нет исполнителя</span>'
+    : '';
+  const canArchive = allowArchive && card.status === 'DONE';
+  const filesCount = (card.attachments || []).length;
+  const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
+  const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
+  const logButton = showLog ? ' <button type="button" class="btn-small btn-secondary log-btn" data-log-card="' + card.id + '">Log</button>' : '';
+  const nameLabel = (card.groupId ? '<span class="group-marker">(Г)</span> ' : '') + escapeHtml(card.name || card.id);
+
+  let html = '<details class="wo-card" data-card-id="' + card.id + '"' + (opened ? ' open' : '') + '>' +
+    '<summary>' +
+    '<div class="summary-line">' +
+    '<div class="summary-text">' +
+    '<strong>' + nameLabel + '</strong>' +
+    ' <span class="summary-sub">' +
+    (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') + contractText +
+    filesButton + logButton +
+    '</span>' +
+    '</div>' +
+    '<div class="summary-actions">' +
+    (missingBadge ? missingBadge + ' ' : '') + stateBadge +
+    (canArchive ? ' <button type="button" class="btn-small btn-secondary archive-move-btn" data-card-id="' + card.id + '">Перенести в архив</button>' : '') +
+    '</div>' +
+    '</div>' +
+    '</summary>';
+
+  html += buildCardInfoBlock(card);
+  html += buildOperationsTable(card, { readonly: false, showQuantityColumn: false });
+  html += '</details>';
+  return html;
+}
+
 function renderExecutorCell(op, card, { readonly = false } = {}) {
   const extras = Array.isArray(op.additionalExecutors) ? op.additionalExecutors : [];
   if (readonly) {
@@ -2723,25 +2775,31 @@ function renderItemListRow(card, op, { readonly = false, colspan = 9, blankForPr
 
 function renderWorkordersTable({ collapseAll = false } = {}) {
   const wrapper = document.getElementById('workorders-table-wrapper');
-  const cardsWithOps = cards.filter(c => !c.archived && c.operations && c.operations.length);
-  if (!cardsWithOps.length) {
+  const rootCards = cards.filter(c => !c.archived && !c.groupId);
+  const hasOperations = rootCards.some(card => {
+    if (isGroupCard(card)) {
+      return getGroupChildren(card).some(ch => !ch.archived && ch.operations && ch.operations.length);
+    }
+    return card.operations && card.operations.length;
+  });
+  if (!hasOperations) {
     wrapper.innerHTML = '<p>Маршрутных операций пока нет.</p>';
     return;
   }
 
   if (collapseAll) {
     workorderOpenCards.clear();
+    workorderOpenGroups.clear();
   }
 
   const termRaw = workorderSearchTerm.trim();
-  const contractTerm = workorderContractTerm.trim().toLowerCase();
-  const filteredByStatus = cardsWithOps.filter(card => {
+  const filteredByStatus = rootCards.filter(card => {
     const state = getCardProcessState(card);
     return workorderStatusFilter === 'ALL' || state.key === workorderStatusFilter;
   });
 
   const filteredByMissingExecutor = workorderMissingExecutorFilter === 'NO_EXECUTOR'
-    ? filteredByStatus.filter(card => cardHasMissingExecutors(card))
+    ? filteredByStatus.filter(card => isGroupCard(card) ? groupHasMissingExecutors(card) : cardHasMissingExecutors(card))
     : filteredByStatus;
 
   if (!filteredByMissingExecutor.length) {
@@ -2749,66 +2807,79 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
     return;
   }
 
+  const scoreFn = (card) => cardSearchScoreWithChildren(card, termRaw);
   let sortedCards = [...filteredByMissingExecutor];
   if (termRaw) {
-    sortedCards.sort((a, b) => cardSearchScore(b, termRaw) - cardSearchScore(a, termRaw));
+    sortedCards.sort((a, b) => scoreFn(b) - scoreFn(a));
   }
 
   const filteredBySearch = termRaw
-    ? sortedCards.filter(card => cardSearchScore(card, termRaw) > 0)
+    ? sortedCards.filter(card => scoreFn(card) > 0)
     : sortedCards;
 
-  const filteredByContract = contractTerm
-    ? filteredBySearch.filter(card => (card.contractNumber || '').toLowerCase().includes(contractTerm))
-    : filteredBySearch;
-
-  if (!filteredByContract.length) {
+  if (!filteredBySearch.length) {
     wrapper.innerHTML = '<p>Карты по запросу не найдены.</p>';
     return;
   }
 
   let html = '';
-  filteredByContract.forEach(card => {
-    const opened = !collapseAll && workorderOpenCards.has(card.id);
-    const stateBadge = renderCardStateBadge(card);
-    const missingBadge = cardHasMissingExecutors(card)
-      ? '<span class="status-pill status-pill-missing-executor" title="Есть операции без исполнителя">Нет исполнителя</span>'
-      : '';
-    const canArchive = card.status === 'DONE';
-    const filesCount = (card.attachments || []).length;
-    const barcodeInline = card.barcode
-      ? ' • № карты: <span class="summary-barcode">' + escapeHtml(card.barcode) + ' <button type="button" class="btn-small btn-secondary wo-barcode-btn" data-card-id="' + card.id + '">Штрихкод</button></span>'
-      : '';
-    const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
-    const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
-    const logButton = ' <button type="button" class="btn-small btn-secondary log-btn" data-log-card="' + card.id + '">Log</button>';
-    const nameLabel = (card.groupId ? '<span class="group-marker">(Г)</span> ' : '') + escapeHtml(card.name || card.id);
+  filteredBySearch.forEach(card => {
+    if (isGroupCard(card)) {
+      const children = getGroupChildren(card).filter(c => !c.archived);
+      const opened = !collapseAll && workorderOpenGroups.has(card.id);
+      const stateBadge = renderCardStateBadge(card);
+      const missingBadge = groupHasMissingExecutors(card)
+        ? '<span class="status-pill status-pill-missing-executor" title="Есть операции без исполнителя">Нет исполнителя</span>'
+        : '';
+      const filesCount = (card.attachments || []).length;
+      const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
+      const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
+      const childrenHtml = children.length
+        ? children.map(child => buildWorkorderCardDetails(child, { opened: !collapseAll && workorderOpenCards.has(child.id), allowArchive: false })).join('')
+        : '<p class="group-empty">В группе нет карт для отображения.</p>';
 
-    html += '<details class="wo-card" data-card-id="' + card.id + '"' + (opened ? ' open' : '') + '>' +
-      '<summary>' +
-      '<div class="summary-line">' +
-      '<div class="summary-text">' +
-      '<strong>' + nameLabel + '</strong>' +
-      ' <span class="summary-sub">' +
-      (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') + contractText +
-      barcodeInline + filesButton + logButton +
-      '</span>' +
-      '</div>' +
-      '<div class="summary-actions">' +
-      (missingBadge ? missingBadge + ' ' : '') + stateBadge +
-      (canArchive ? ' <button type="button" class="btn-small btn-secondary archive-move-btn" data-card-id="' + card.id + '">Перенести в архив</button>' : '') +
-      '</div>' +
-      '</div>' +
-      '</summary>';
-
-    html += buildCardInfoBlock(card);
-    html += buildOperationsTable(card, { readonly: false, showQuantityColumn: false });
-    html += '</details>';
+      html += '<details class="wo-card group-wo-card" data-group-id="' + card.id + '"' + (opened ? ' open' : '') + '>' +
+        '<summary>' +
+        '<div class="summary-line">' +
+        '<div class="summary-text">' +
+        '<strong><span class="group-marker">(Г)</span>' + escapeHtml(card.name || card.id) + '</strong>' +
+        ' <span class="summary-sub">' +
+        (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') + contractText +
+        filesButton +
+        '</span>' +
+        '</div>' +
+        '<div class="summary-actions">' +
+        (missingBadge ? missingBadge + ' ' : '') + stateBadge +
+        (card.status === 'DONE' ? ' <button type="button" class="btn-small btn-secondary archive-group-btn" data-group-id="' + card.id + '">Перенести в архив</button>' : '') +
+        '</div>' +
+        '</div>' +
+        '</summary>' +
+        '<div class="group-children">' + childrenHtml + '</div>' +
+        '</details>';
+    } else if (card.operations && card.operations.length) {
+      const opened = !collapseAll && workorderOpenCards.has(card.id);
+      html += buildWorkorderCardDetails(card, { opened });
+    }
   });
 
   wrapper.innerHTML = html;
 
-  wrapper.querySelectorAll('.wo-card').forEach(detail => {
+  wrapper.querySelectorAll('.group-wo-card').forEach(detail => {
+    const groupId = detail.getAttribute('data-group-id');
+    if (detail.open && groupId) {
+      workorderOpenGroups.add(groupId);
+    }
+    detail.addEventListener('toggle', () => {
+      if (!groupId) return;
+      if (detail.open) {
+        workorderOpenGroups.add(groupId);
+      } else {
+        workorderOpenGroups.delete(groupId);
+      }
+    });
+  });
+
+  wrapper.querySelectorAll('.wo-card[data-card-id]').forEach(detail => {
     const cardId = detail.getAttribute('data-card-id');
     if (detail.open && cardId) {
       workorderOpenCards.add(cardId);
@@ -2820,15 +2891,6 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       } else {
         workorderOpenCards.delete(cardId);
       }
-    });
-  });
-
-  wrapper.querySelectorAll('.wo-barcode-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const id = btn.getAttribute('data-card-id');
-      const card = cards.find(c => c.id === id);
-      if (!card) return;
-      openBarcodeModal(card);
     });
   });
 
@@ -2850,11 +2912,28 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
     });
   });
 
+  wrapper.querySelectorAll('.archive-group-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-group-id');
+      const group = cards.find(c => c.id === id && isGroupCard(c));
+      if (!group) return;
+      const related = [group, ...getGroupChildren(group)];
+      related.forEach(card => {
+        if (!card.archived) {
+          recordCardLog(card, { action: 'Архивирование', object: 'Карта', field: 'archived', oldValue: false, newValue: true });
+        }
+        card.archived = true;
+      });
+      saveData();
+      renderEverything();
+    });
+  });
+
   wrapper.querySelectorAll('.archive-move-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const id = btn.getAttribute('data-card-id');
       const card = cards.find(c => c.id === id);
-      if (!card) return;
+      if (!card || card.groupId) return;
       if (!card.archived) {
         recordCardLog(card, { action: 'Архивирование', object: 'Карта', field: 'archived', oldValue: false, newValue: true });
       }
@@ -3143,7 +3222,6 @@ function renderArchiveTable() {
   }
 
   const termRaw = archiveSearchTerm.trim();
-  const contractTerm = archiveContractTerm.trim().toLowerCase();
   const filteredByStatus = archivedCards.filter(card => {
     const state = getCardProcessState(card);
     return archiveStatusFilter === 'ALL' || state.key === archiveStatusFilter;
@@ -3163,17 +3241,13 @@ function renderArchiveTable() {
     ? sortedCards.filter(card => cardSearchScore(card, termRaw) > 0)
     : sortedCards;
 
-  const filteredByContract = contractTerm
-    ? filteredBySearch.filter(card => (card.contractNumber || '').toLowerCase().includes(contractTerm))
-    : filteredBySearch;
-
-  if (!filteredByContract.length) {
+  if (!filteredBySearch.length) {
     wrapper.innerHTML = '<p>Архивные карты по запросу не найдены.</p>';
     return;
   }
 
   let html = '';
-  filteredByContract.forEach(card => {
+  filteredBySearch.forEach(card => {
     const stateBadge = renderCardStateBadge(card);
     const filesCount = (card.attachments || []).length;
     const barcodeInline = card.barcode
@@ -3617,7 +3691,6 @@ function setupForms() {
   const searchInput = document.getElementById('workorder-search');
   const searchClearBtn = document.getElementById('workorder-search-clear');
   const statusSelect = document.getElementById('workorder-status');
-  const contractInput = document.getElementById('workorder-contract');
   const missingExecutorSelect = document.getElementById('workorder-missing-executor');
   if (searchInput) {
     searchInput.addEventListener('input', e => {
@@ -3625,18 +3698,10 @@ function setupForms() {
       renderWorkordersTable({ collapseAll: true });
     });
   }
-  if (contractInput) {
-    contractInput.addEventListener('input', e => {
-      workorderContractTerm = e.target.value || '';
-      renderWorkordersTable({ collapseAll: true });
-    });
-  }
   if (searchClearBtn) {
     searchClearBtn.addEventListener('click', () => {
       workorderSearchTerm = '';
       if (searchInput) searchInput.value = '';
-      workorderContractTerm = '';
-      if (contractInput) contractInput.value = '';
       if (statusSelect) statusSelect.value = 'ALL';
       workorderStatusFilter = 'ALL';
       workorderMissingExecutorFilter = 'ALL';
@@ -3662,16 +3727,9 @@ function setupForms() {
   const archiveSearchInput = document.getElementById('archive-search');
   const archiveSearchClear = document.getElementById('archive-search-clear');
   const archiveStatusSelect = document.getElementById('archive-status');
-  const archiveContractInput = document.getElementById('archive-contract');
   if (archiveSearchInput) {
     archiveSearchInput.addEventListener('input', e => {
       archiveSearchTerm = e.target.value || '';
-      renderArchiveTable();
-    });
-  }
-  if (archiveContractInput) {
-    archiveContractInput.addEventListener('input', e => {
-      archiveContractTerm = e.target.value || '';
       renderArchiveTable();
     });
   }
@@ -3685,8 +3743,6 @@ function setupForms() {
     archiveSearchClear.addEventListener('click', () => {
       archiveSearchTerm = '';
       if (archiveSearchInput) archiveSearchInput.value = '';
-      archiveContractTerm = '';
-      if (archiveContractInput) archiveContractInput.value = '';
       archiveStatusFilter = 'ALL';
       if (archiveStatusSelect) archiveStatusSelect.value = 'ALL';
       renderArchiveTable();

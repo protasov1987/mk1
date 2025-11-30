@@ -306,6 +306,15 @@ thead {
   background: #f8f5ff;
 }
 
+.group-children {
+  padding: 8px 12px 12px;
+}
+
+.group-empty {
+  margin: 8px 0 0;
+  color: #6b7280;
+}
+
 .group-child-row td {
   background: #f9fafb;
 }
@@ -314,6 +323,10 @@ thead {
   color: #7c3aed;
   font-weight: 700;
   margin-right: 4px;
+}
+
+.group-toggle-btn {
+  color: #7c3aed;
 }
 
 .group-indent {
