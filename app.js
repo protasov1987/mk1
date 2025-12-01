@@ -2344,6 +2344,31 @@ function renderDraftItemsRow(op, colspan = 8) {
     '</td></tr>';
 }
 
+function updateRouteTableScrollState() {
+  const wrapper = document.getElementById('route-table-wrapper');
+  if (!wrapper) return;
+  wrapper.style.removeProperty('--route-table-max-height');
+  wrapper.classList.remove('route-table-scrollable');
+}
+
+function scrollRouteAreaToLatest() {
+  const wrapper = document.getElementById('route-table-wrapper');
+  const modalBody = document.querySelector('#card-modal .modal-body');
+  if (!wrapper || !modalBody) return;
+  const lastRow = wrapper.querySelector('tbody tr:last-child');
+  if (!lastRow) {
+    modalBody.scrollTop = modalBody.scrollHeight;
+    return;
+  }
+  const bodyRect = modalBody.getBoundingClientRect();
+  const rowRect = lastRow.getBoundingClientRect();
+  if (rowRect.bottom > bodyRect.bottom) {
+    modalBody.scrollTop += (rowRect.bottom - bodyRect.bottom) + 12;
+  } else if (rowRect.top < bodyRect.top) {
+    modalBody.scrollTop -= (bodyRect.top - rowRect.top) + 12;
+  }
+}
+
 function renderRouteTableDraft() {
   const wrapper = document.getElementById('route-table-wrapper');
   if (!wrapper || !activeCardDraft) return;
@@ -2352,6 +2377,7 @@ function renderRouteTableDraft() {
   if (!opsArr.length) {
     wrapper.innerHTML = '<p>Маршрут пока пуст. Добавьте операции ниже.</p>';
     document.getElementById('card-status-text').textContent = cardStatusText(activeCardDraft);
+    requestAnimationFrame(() => updateRouteTableScrollState());
     return;
   }
   const sortedOps = [...opsArr].sort((a, b) => (a.order || 0) - (b.order || 0));
@@ -2462,6 +2488,11 @@ function renderRouteTableDraft() {
         recordCardLog(activeCardDraft, { action: 'Список изделий', object: opLogLabel(op), field: 'itemName', targetId: item.id, oldValue: prev, newValue: value });
       }
     });
+  });
+
+  requestAnimationFrame(() => {
+    updateRouteTableScrollState();
+    scrollRouteAreaToLatest();
   });
 }
 
@@ -3726,13 +3757,6 @@ function setupForms() {
     groupCancelBtn.addEventListener('click', () => closeGroupModal());
   }
 
-  const groupModal = document.getElementById('group-modal');
-  if (groupModal) {
-    groupModal.addEventListener('click', (e) => {
-      if (e.target === groupModal) closeGroupModal();
-    });
-  }
-
   document.getElementById('route-form').addEventListener('submit', e => {
     e.preventDefault();
     if (!activeCardDraft) return;
@@ -3816,6 +3840,12 @@ function setupForms() {
   if (centerFilterInput) {
     centerFilterInput.addEventListener('input', () => fillRouteSelectors());
   }
+
+  const cardModalBody = document.querySelector('#card-modal .modal-body');
+  if (cardModalBody) {
+    cardModalBody.addEventListener('scroll', () => updateRouteTableScrollState());
+  }
+  window.addEventListener('resize', () => updateRouteTableScrollState());
 
   document.getElementById('center-form').addEventListener('submit', e => {
     e.preventDefault();
