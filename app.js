@@ -981,12 +981,13 @@ function renderDashboard() {
   const eligibleCards = activeCards.filter(c => c.status !== 'NOT_STARTED');
   if (!eligibleCards.length) {
     dashTableWrapper.innerHTML = '<p>Карт для отображения пока нет.</p>';
+    if (typeof resetDashboardRotation === 'function') {
+      resetDashboardRotation();
+    }
     return;
   }
 
-  let html = '<table><thead><tr><th>№ карты (EAN-13)</th><th>Наименование</th><th>Заказ</th><th>Статус / операции</th><th>Сделано деталей</th><th>Выполнено операций</th><th>Комментарии</th></tr></thead><tbody>';
-
-  eligibleCards.forEach(card => {
+  const dashCardsPayload = eligibleCards.map(card => {
     const opsArr = card.operations || [];
     const activeOps = opsArr.filter(o => o.status === 'IN_PROGRESS' || o.status === 'PAUSED');
     let statusHtml = '';
@@ -1041,23 +1042,23 @@ function renderDashboard() {
     const commentLines = opsForDisplay
       .filter(o => o.comment)
       .map(o => '<div class="dash-comment-line"><span class="dash-comment-op">' + renderOpLabel(o) + ':</span> ' + escapeHtml(o.comment) + '</div>');
-    const qtyCell = qtyLines.length ? qtyLines.join('') : '—';
-    const commentCell = commentLines.join('');
-
     const nameCell = (card.groupId ? '<span class="group-marker">(Г)</span>' : '') + escapeHtml(card.name);
-    html += '<tr>' +
-      '<td>' + escapeHtml(card.barcode || '') + '</td>' +
-      '<td>' + nameCell + '</td>' +
-      '<td>' + escapeHtml(card.orderNo || '') + '</td>' +
-      '<td><span class="dashboard-card-status" data-card-id="' + card.id + '">' + statusHtml + '</span></td>' +
-      '<td>' + qtyCell + '</td>' +
-      '<td>' + completedCount + ' из ' + (card.operations ? card.operations.length : 0) + '</td>' +
-      '<td>' + commentCell + '</td>' +
-      '</tr>';
+
+    return {
+      id: card.id,
+      barcode: escapeHtml(card.barcode || ''),
+      orderNo: escapeHtml(card.orderNo || ''),
+      statusHtml,
+      qtyHtml: qtyLines.length ? qtyLines.join('') : '—',
+      progressText: completedCount + ' из ' + (card.operations ? card.operations.length : 0),
+      commentsHtml: commentLines.join(''),
+      nameHtml: nameCell
+    };
   });
 
-  html += '</tbody></table>';
-  dashTableWrapper.innerHTML = html;
+  if (typeof renderDashboardPages === 'function') {
+    renderDashboardPages(dashCardsPayload);
+  }
 }
 
 // === РЕНДЕРИНГ ТЕХ.КАРТ ===
