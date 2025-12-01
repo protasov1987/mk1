@@ -7,6 +7,7 @@ let centers = [];
 let workorderSearchTerm = '';
 let workorderStatusFilter = 'ALL';
 let workorderMissingExecutorFilter = 'ALL';
+let workorderAutoScrollEnabled = true;
 let archiveSearchTerm = '';
 let archiveStatusFilter = 'ALL';
 let apiOnline = false;
@@ -2649,6 +2650,25 @@ function buildWorkorderCardDetails(card, { opened = false, allowArchive = true, 
   return html;
 }
 
+function scrollWorkorderDetailsIntoViewIfNeeded(detailsEl) {
+  if (!detailsEl || !workorderAutoScrollEnabled) return;
+
+  requestAnimationFrame(() => {
+    const rect = detailsEl.getBoundingClientRect();
+    if (rect.bottom <= window.innerHeight) return;
+
+    const header = document.querySelector('header');
+    const headerOffset = header ? header.getBoundingClientRect().height : 0;
+    const offset = headerOffset + 16;
+    const targetTop = window.scrollY + rect.top - offset;
+
+    window.scrollTo({
+      top: targetTop,
+      behavior: 'smooth',
+    });
+  });
+}
+
 function renderExecutorCell(op, card, { readonly = false } = {}) {
   const extras = Array.isArray(op.additionalExecutors) ? op.additionalExecutors : [];
   if (readonly) {
@@ -2963,6 +2983,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       if (!groupId) return;
       if (detail.open) {
         workorderOpenGroups.add(groupId);
+        scrollWorkorderDetailsIntoViewIfNeeded(detail);
       } else {
         workorderOpenGroups.delete(groupId);
       }
@@ -2978,6 +2999,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       if (!cardId) return;
       if (detail.open) {
         workorderOpenCards.add(cardId);
+        scrollWorkorderDetailsIntoViewIfNeeded(detail);
       } else {
         workorderOpenCards.delete(cardId);
       }
@@ -3835,6 +3857,14 @@ function setupForms() {
       cardsSearchTerm = '';
       if (cardsSearchInput) cardsSearchInput.value = '';
       renderCardsTable();
+    });
+  }
+
+  const workorderAutoscrollCheckbox = document.getElementById('workorder-autoscroll');
+  if (workorderAutoscrollCheckbox) {
+    workorderAutoscrollCheckbox.checked = workorderAutoScrollEnabled;
+    workorderAutoscrollCheckbox.addEventListener('change', (e) => {
+      workorderAutoScrollEnabled = !!e.target.checked;
     });
   }
 
