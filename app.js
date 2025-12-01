@@ -3726,13 +3726,6 @@ function setupForms() {
     groupCancelBtn.addEventListener('click', () => closeGroupModal());
   }
 
-  const groupModal = document.getElementById('group-modal');
-  if (groupModal) {
-    groupModal.addEventListener('click', (e) => {
-      if (e.target === groupModal) closeGroupModal();
-    });
-  }
-
   document.getElementById('route-form').addEventListener('submit', e => {
     e.preventDefault();
     if (!activeCardDraft) return;
@@ -3786,6 +3779,10 @@ function setupForms() {
     renumberAutoCodesForCard(activeCardDraft);
     document.getElementById('card-status-text').textContent = cardStatusText(activeCardDraft);
     renderRouteTableDraft();
+    const tableWrapper = document.getElementById('route-table-wrapper');
+    if (tableWrapper) {
+      tableWrapper.scrollTop = tableWrapper.scrollHeight;
+    }
     document.getElementById('route-form').reset();
     routeQtyManual = false;
     const qtyField = document.getElementById('route-qty');
