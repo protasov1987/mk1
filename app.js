@@ -2344,6 +2344,46 @@ function renderDraftItemsRow(op, colspan = 8) {
     '</td></tr>';
 }
 
+function calculateRouteTableMaxHeight() {
+  const routeHeader = document.querySelector('#route-editor > h3');
+  const wrapper = document.getElementById('route-table-wrapper');
+  if (!routeHeader || !wrapper) return null;
+  const addPanel = document.querySelector('#route-editor .route-add-panel');
+  const modalActions = document.querySelector('#card-modal .card-modal-actions');
+  const titleTop = routeHeader.getBoundingClientRect().top;
+  const viewportHeight = window.innerHeight;
+  const addPanelHeight = addPanel ? addPanel.getBoundingClientRect().height : 0;
+  const actionsHeight = modalActions ? modalActions.getBoundingClientRect().height : 0;
+  const padding = 32;
+  return viewportHeight - titleTop - addPanelHeight - actionsHeight - padding;
+}
+
+function updateRouteTableScrollState() {
+  const wrapper = document.getElementById('route-table-wrapper');
+  const routeHeader = document.querySelector('#route-editor > h3');
+  if (!wrapper || !routeHeader) return;
+  const reachedTop = routeHeader.getBoundingClientRect().top <= 16;
+  if (reachedTop) {
+    const maxHeight = Math.max(calculateRouteTableMaxHeight() || 0, 220);
+    wrapper.style.setProperty('--route-table-max-height', `${maxHeight}px`);
+  } else {
+    wrapper.style.removeProperty('--route-table-max-height');
+  }
+  wrapper.classList.toggle('route-table-scrollable', reachedTop);
+}
+
+function scrollRouteAreaToLatest() {
+  const wrapper = document.getElementById('route-table-wrapper');
+  const modalBody = document.querySelector('#card-modal .modal-body');
+  if (!wrapper || !modalBody) return;
+  const useWrapperScroll = wrapper.classList.contains('route-table-scrollable');
+  if (useWrapperScroll) {
+    wrapper.scrollTop = wrapper.scrollHeight;
+  } else {
+    modalBody.scrollTop = modalBody.scrollHeight;
+  }
+}
+
 function renderRouteTableDraft() {
   const wrapper = document.getElementById('route-table-wrapper');
   if (!wrapper || !activeCardDraft) return;
@@ -2352,6 +2392,7 @@ function renderRouteTableDraft() {
   if (!opsArr.length) {
     wrapper.innerHTML = '<p>Маршрут пока пуст. Добавьте операции ниже.</p>';
     document.getElementById('card-status-text').textContent = cardStatusText(activeCardDraft);
+    requestAnimationFrame(() => updateRouteTableScrollState());
     return;
   }
   const sortedOps = [...opsArr].sort((a, b) => (a.order || 0) - (b.order || 0));
@@ -2462,6 +2503,11 @@ function renderRouteTableDraft() {
         recordCardLog(activeCardDraft, { action: 'Список изделий', object: opLogLabel(op), field: 'itemName', targetId: item.id, oldValue: prev, newValue: value });
       }
     });
+  });
+
+  requestAnimationFrame(() => {
+    updateRouteTableScrollState();
+    scrollRouteAreaToLatest();
   });
 }
 
@@ -3813,6 +3859,12 @@ function setupForms() {
   if (centerFilterInput) {
     centerFilterInput.addEventListener('input', () => fillRouteSelectors());
   }
+
+  const cardModalBody = document.querySelector('#card-modal .modal-body');
+  if (cardModalBody) {
+    cardModalBody.addEventListener('scroll', () => updateRouteTableScrollState());
+  }
+  window.addEventListener('resize', () => updateRouteTableScrollState());
 
   document.getElementById('center-form').addEventListener('submit', e => {
     e.preventDefault();

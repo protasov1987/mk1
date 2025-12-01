@@ -510,8 +510,12 @@ tbody tr:nth-child(even) {
 
 #route-table-wrapper {
   flex: 1 1 auto;
-  max-height: 40vh;
+  overflow: visible;
+}
+
+#route-table-wrapper.route-table-scrollable {
   overflow: auto;
+  max-height: var(--route-table-max-height, 60vh);
   padding-right: 4px;
 }
 
