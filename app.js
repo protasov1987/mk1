@@ -979,14 +979,23 @@ function renderDashboard() {
 
   const dashTableWrapper = document.getElementById('dashboard-cards');
   const eligibleCards = activeCards.filter(c => c.status !== 'NOT_STARTED');
+  const emptyMessage = '<p>Карт для отображения пока нет.</p>';
+  const tableHeader = '<thead><tr><th>№ карты (EAN-13)</th><th>Наименование</th><th>Заказ</th><th>Статус / операции</th><th>Сделано деталей</th><th>Выполнено операций</th><th>Комментарии</th></tr></thead>';
+
   if (!eligibleCards.length) {
-    dashTableWrapper.innerHTML = '<p>Карт для отображения пока нет.</p>';
+    if (window.dashboardPager && typeof window.dashboardPager.render === 'function') {
+      window.dashboardPager.render({
+        headerHtml: tableHeader,
+        rowsHtml: [],
+        emptyMessage
+      });
+    } else if (dashTableWrapper) {
+      dashTableWrapper.innerHTML = emptyMessage;
+    }
     return;
   }
 
-  let html = '<table><thead><tr><th>№ карты (EAN-13)</th><th>Наименование</th><th>Заказ</th><th>Статус / операции</th><th>Сделано деталей</th><th>Выполнено операций</th><th>Комментарии</th></tr></thead><tbody>';
-
-  eligibleCards.forEach(card => {
+  const rowsHtml = eligibleCards.map(card => {
     const opsArr = card.operations || [];
     const activeOps = opsArr.filter(o => o.status === 'IN_PROGRESS' || o.status === 'PAUSED');
     let statusHtml = '';
@@ -1045,7 +1054,7 @@ function renderDashboard() {
     const commentCell = commentLines.join('');
 
     const nameCell = (card.groupId ? '<span class="group-marker">(Г)</span>' : '') + escapeHtml(card.name);
-    html += '<tr>' +
+    return '<tr>' +
       '<td>' + escapeHtml(card.barcode || '') + '</td>' +
       '<td>' + nameCell + '</td>' +
       '<td>' + escapeHtml(card.orderNo || '') + '</td>' +
@@ -1056,8 +1065,15 @@ function renderDashboard() {
       '</tr>';
   });
 
-  html += '</tbody></table>';
-  dashTableWrapper.innerHTML = html;
+  if (window.dashboardPager && typeof window.dashboardPager.render === 'function') {
+    window.dashboardPager.render({
+      headerHtml: tableHeader,
+      rowsHtml,
+      emptyMessage
+    });
+  } else if (dashTableWrapper) {
+    dashTableWrapper.innerHTML = '<table>' + tableHeader + '<tbody>' + rowsHtml.join('') + '</tbody></table>';
+  }
 }
 
 // === РЕНДЕРИНГ ТЕХ.КАРТ ===
