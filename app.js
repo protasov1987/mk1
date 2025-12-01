@@ -2344,43 +2344,28 @@ function renderDraftItemsRow(op, colspan = 8) {
     '</td></tr>';
 }
 
-function calculateRouteTableMaxHeight() {
-  const routeHeader = document.querySelector('#route-editor > h3');
-  const wrapper = document.getElementById('route-table-wrapper');
-  if (!routeHeader || !wrapper) return null;
-  const addPanel = document.querySelector('#route-editor .route-add-panel');
-  const modalActions = document.querySelector('#card-modal .card-modal-actions');
-  const titleTop = routeHeader.getBoundingClientRect().top;
-  const viewportHeight = window.innerHeight;
-  const addPanelHeight = addPanel ? addPanel.getBoundingClientRect().height : 0;
-  const actionsHeight = modalActions ? modalActions.getBoundingClientRect().height : 0;
-  const padding = 32;
-  return viewportHeight - titleTop - addPanelHeight - actionsHeight - padding;
-}
-
 function updateRouteTableScrollState() {
   const wrapper = document.getElementById('route-table-wrapper');
-  const routeHeader = document.querySelector('#route-editor > h3');
-  if (!wrapper || !routeHeader) return;
-  const reachedTop = routeHeader.getBoundingClientRect().top <= 16;
-  if (reachedTop) {
-    const maxHeight = Math.max(calculateRouteTableMaxHeight() || 0, 220);
-    wrapper.style.setProperty('--route-table-max-height', `${maxHeight}px`);
-  } else {
-    wrapper.style.removeProperty('--route-table-max-height');
-  }
-  wrapper.classList.toggle('route-table-scrollable', reachedTop);
+  if (!wrapper) return;
+  wrapper.style.removeProperty('--route-table-max-height');
+  wrapper.classList.remove('route-table-scrollable');
 }
 
 function scrollRouteAreaToLatest() {
   const wrapper = document.getElementById('route-table-wrapper');
   const modalBody = document.querySelector('#card-modal .modal-body');
   if (!wrapper || !modalBody) return;
-  const useWrapperScroll = wrapper.classList.contains('route-table-scrollable');
-  if (useWrapperScroll) {
-    wrapper.scrollTop = wrapper.scrollHeight;
-  } else {
+  const lastRow = wrapper.querySelector('tbody tr:last-child');
+  if (!lastRow) {
     modalBody.scrollTop = modalBody.scrollHeight;
+    return;
+  }
+  const bodyRect = modalBody.getBoundingClientRect();
+  const rowRect = lastRow.getBoundingClientRect();
+  if (rowRect.bottom > bodyRect.bottom) {
+    modalBody.scrollTop += (rowRect.bottom - bodyRect.bottom) + 12;
+  } else if (rowRect.top < bodyRect.top) {
+    modalBody.scrollTop -= (bodyRect.top - rowRect.top) + 12;
   }
 }
 
