@@ -291,6 +291,29 @@
     </div>
   </div>
 
+  <div id="group-executor-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="group-executor-title">
+    <div class="modal-content group-executor-modal-content">
+      <div class="modal-header">
+        <h3 id="group-executor-title">Групповой исполнитель</h3>
+      </div>
+      <div class="modal-body">
+        <p class="group-executor-warning">При создании группового исполнителя операции все текущие исполнители операции будут удалены во всех картах группы!</p>
+        <div class="flex-col">
+          <label for="group-executor-input">Групповой исполнитель операции</label>
+          <input id="group-executor-input" />
+        </div>
+        <div class="flex-col">
+          <label for="group-op-code-input">Код операции</label>
+          <input id="group-op-code-input" />
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="group-executor-submit" class="btn-primary">Создать</button>
+        <button type="button" id="group-executor-cancel" class="btn-secondary">Отмена</button>
+      </div>
+    </div>
+  </div>
+
   <div id="log-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="log-title">
     <div class="modal-content log-content">
       <div class="modal-header log-header">

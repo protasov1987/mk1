@@ -283,6 +283,29 @@ textarea {
   font-size: 12px;
 }
 
+.group-executor-btn {
+  background: #fff7ed;
+  color: #92400e;
+  border: 1px solid #facc15;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.2;
+  min-width: 90px;
+  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: normal;
+}
+
+.group-executor-btn:hover {
+  background: #fef3c7;
+}
+
+.group-executor-label {
+  display: block;
+}
+
 .barcode-view-btn {
   display: inline-flex;
   align-items: center;
@@ -572,6 +595,21 @@ tbody tr:nth-child(even) {
 
 .info-modal-content .modal-body {
   font-size: 16px;
+}
+
+.group-executor-modal-content {
+  max-width: 520px;
+}
+
+.group-executor-warning {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #facc15;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.4;
+  margin-bottom: 12px;
 }
 
 .attachments-actions {

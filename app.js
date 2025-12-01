@@ -23,6 +23,7 @@ const ATTACH_MAX_SIZE = 15 * 1024 * 1024; // 15 MB
 let logContextCardId = null;
 let clockIntervalId = null;
 const cardsGroupOpen = new Set();
+let groupExecutorContext = null;
 
 function setConnectionStatus(message, variant = 'info') {
   const banner = document.getElementById('server-status');
@@ -1839,6 +1840,88 @@ function updateAttachmentCounters(cardId) {
   }
 }
 
+function openGroupExecutorModal(groupId) {
+  const modal = document.getElementById('group-executor-modal');
+  const executorInput = document.getElementById('group-executor-input');
+  const opCodeInput = document.getElementById('group-op-code-input');
+  const group = cards.find(c => c.id === groupId && isGroupCard(c));
+  if (!modal || !group) return;
+  groupExecutorContext = { groupId };
+  if (executorInput) executorInput.value = '';
+  if (opCodeInput) opCodeInput.value = '';
+  modal.classList.remove('hidden');
+  if (executorInput) executorInput.focus();
+}
+
+function closeGroupExecutorModal() {
+  const modal = document.getElementById('group-executor-modal');
+  if (modal) modal.classList.add('hidden');
+  groupExecutorContext = null;
+}
+
+function applyGroupExecutorToGroup() {
+  const executorInput = document.getElementById('group-executor-input');
+  const opCodeInput = document.getElementById('group-op-code-input');
+  if (!groupExecutorContext) return;
+
+  const executor = (executorInput ? executorInput.value : '').trim();
+  const opCodeRaw = (opCodeInput ? opCodeInput.value : '').trim();
+  const group = cards.find(c => c.id === groupExecutorContext.groupId && isGroupCard(c));
+
+  if (!group) {
+    closeGroupExecutorModal();
+    return;
+  }
+
+  if (!executor || !opCodeRaw) {
+    alert('Укажите группового исполнителя и код операции.');
+    return;
+  }
+
+  const targetCode = opCodeRaw.toUpperCase();
+  const children = getGroupChildren(group).filter(c => !c.archived);
+  let matched = 0;
+  let updated = 0;
+
+  children.forEach(card => {
+    (card.operations || []).forEach(op => {
+      const opCodeValue = (op.opCode || '').trim().toUpperCase();
+      if (opCodeValue !== targetCode) return;
+      matched++;
+      const prevExecutor = op.executor || '';
+      const prevExtras = Array.isArray(op.additionalExecutors) ? [...op.additionalExecutors] : [];
+      const extrasChanged = prevExtras.length > 0;
+      const executorChanged = prevExecutor !== executor;
+      op.executor = executor;
+      op.additionalExecutors = [];
+      if (executorChanged) {
+        recordCardLog(card, { action: 'Исполнитель', object: opLogLabel(op), field: 'executor', targetId: op.id, oldValue: prevExecutor, newValue: executor });
+      }
+      if (extrasChanged) {
+        recordCardLog(card, { action: 'Доп. исполнитель', object: opLogLabel(op), field: 'additionalExecutors', targetId: op.id, oldValue: prevExtras.join(', '), newValue: 'очищено' });
+      }
+      if (executorChanged || extrasChanged) {
+        updated++;
+      }
+    });
+    recalcCardStatus(card);
+  });
+
+  recalcCardStatus(group);
+
+  if (!matched) {
+    alert('В группе нет операций с указанным кодом.');
+    return;
+  }
+
+  if (updated) {
+    saveData();
+    renderDashboard();
+  }
+  renderWorkordersTable();
+  closeGroupExecutorModal();
+}
+
 function buildLogHistoryTable(card) {
   const logs = (card.logs || []).slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
   if (!logs.length) return '<p>История изменений пока отсутствует.</p>';
@@ -2836,6 +2919,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       const missingBadge = groupHasMissingExecutors(card)
         ? '<span class="status-pill status-pill-missing-executor" title="Есть операции без исполнителя">Нет исполнителя</span>'
         : '';
+      const groupExecutorBtn = '<button type="button" class="btn-small group-executor-btn" data-group-id="' + card.id + '"><span class="group-executor-label">Групповой<br>исполнитель</span></button>';
       const filesCount = (card.attachments || []).length;
       const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
       const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-card-id="' + card.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
@@ -2855,7 +2939,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
         '</span>' +
         '</div>' +
         '<div class="summary-actions">' +
-        (missingBadge ? missingBadge + ' ' : '') + stateBadge +
+        groupExecutorBtn + ' ' + (missingBadge ? missingBadge + ' ' : '') + stateBadge +
         (card.status === 'DONE' ? ' <button type="button" class="btn-small btn-secondary archive-group-btn" data-group-id="' + card.id + '">Перенести в архив</button>' : '') +
         '</div>' +
         '</div>' +
@@ -2917,6 +3001,15 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       e.stopPropagation();
       const id = btn.getAttribute('data-attach-card');
       openAttachmentsModal(id, 'live');
+    });
+  });
+
+  wrapper.querySelectorAll('.group-executor-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const groupId = btn.getAttribute('data-group-id');
+      openGroupExecutorModal(groupId);
     });
   });
 
@@ -3830,6 +3923,19 @@ function setupGroupTransferModal() {
   }
 }
 
+function setupGroupExecutorModal() {
+  const createBtn = document.getElementById('group-executor-submit');
+  const cancelBtn = document.getElementById('group-executor-cancel');
+
+  if (createBtn) {
+    createBtn.addEventListener('click', () => applyGroupExecutorToGroup());
+  }
+
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', () => closeGroupExecutorModal());
+  }
+}
+
 function setupAttachmentControls() {
   const modal = document.getElementById('attachments-modal');
   const closeBtn = document.getElementById('attachments-close');
@@ -3864,6 +3970,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupForms();
   setupBarcodeModal();
   setupGroupTransferModal();
+  setupGroupExecutorModal();
   setupAttachmentControls();
   setupLogModal();
   renderEverything();
