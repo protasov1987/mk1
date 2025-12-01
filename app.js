@@ -3810,6 +3810,10 @@ function setupForms() {
     renumberAutoCodesForCard(activeCardDraft);
     document.getElementById('card-status-text').textContent = cardStatusText(activeCardDraft);
     renderRouteTableDraft();
+    const tableWrapper = document.getElementById('route-table-wrapper');
+    if (tableWrapper) {
+      tableWrapper.scrollTop = tableWrapper.scrollHeight;
+    }
     document.getElementById('route-form').reset();
     routeQtyManual = false;
     const qtyField = document.getElementById('route-qty');
