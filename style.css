@@ -502,6 +502,34 @@ tbody tr:nth-child(even) {
   margin: 0;
 }
 
+#route-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#route-table-wrapper {
+  flex: 1 1 auto;
+  overflow: visible;
+}
+
+#route-table-wrapper.route-table-scrollable {
+  overflow: auto;
+  max-height: var(--route-table-max-height, 60vh);
+  padding-right: 4px;
+}
+
+.route-add-panel {
+  position: sticky;
+  bottom: 0;
+  background: #fff;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .btn-link {
   border: none;
   background: none;
