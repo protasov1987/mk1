@@ -52,6 +52,14 @@ nav {
   margin-left: auto;
 }
 
+.card-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .toggle-row {
   display: inline-flex;
   align-items: center;
