@@ -16,7 +16,6 @@ let activeCardDraft = null;
 let activeCardOriginalId = null;
 let activeCardIsNew = false;
 let cardsSearchTerm = '';
-let cardsContractTerm = '';
 let attachmentContext = null;
 let routeQtyManual = false;
 const ATTACH_ACCEPT = '.pdf,.doc,.docx,.jpg,.jpeg,.png,.zip,.rar,.7z';
@@ -1069,13 +1068,8 @@ function renderCardsTable() {
   }
 
   const termRaw = cardsSearchTerm.trim();
-  const contractTerm = cardsContractTerm.trim().toLowerCase();
   const cardMatches = (card) => {
-    const matchesContract = contractTerm
-      ? (card.contractNumber || '').toLowerCase().includes(contractTerm)
-      : true;
-    const matchesSearch = termRaw ? cardSearchScore(card, termRaw) > 0 : true;
-    return matchesContract && matchesSearch;
+    return termRaw ? cardSearchScore(card, termRaw) > 0 : true;
   };
 
   let sortedCards = [...visibleCards];
@@ -3737,16 +3731,9 @@ function setupForms() {
 
   const cardsSearchInput = document.getElementById('cards-search');
   const cardsSearchClear = document.getElementById('cards-search-clear');
-  const cardsContractInput = document.getElementById('cards-contract');
   if (cardsSearchInput) {
     cardsSearchInput.addEventListener('input', e => {
       cardsSearchTerm = e.target.value || '';
-      renderCardsTable();
-    });
-  }
-  if (cardsContractInput) {
-    cardsContractInput.addEventListener('input', e => {
-      cardsContractTerm = e.target.value || '';
       renderCardsTable();
     });
   }
@@ -3754,8 +3741,6 @@ function setupForms() {
     cardsSearchClear.addEventListener('click', () => {
       cardsSearchTerm = '';
       if (cardsSearchInput) cardsSearchInput.value = '';
-      cardsContractTerm = '';
-      if (cardsContractInput) cardsContractInput.value = '';
       renderCardsTable();
     });
   }
