@@ -2360,12 +2360,17 @@ function scrollRouteAreaToLatest() {
     modalBody.scrollTop = modalBody.scrollHeight;
     return;
   }
+  const addPanel = document.querySelector('#route-editor .route-add-panel');
   const bodyRect = modalBody.getBoundingClientRect();
   const rowRect = lastRow.getBoundingClientRect();
-  if (rowRect.bottom > bodyRect.bottom) {
-    modalBody.scrollTop += (rowRect.bottom - bodyRect.bottom) + 12;
-  } else if (rowRect.top < bodyRect.top) {
-    modalBody.scrollTop -= (bodyRect.top - rowRect.top) + 12;
+  const stickyBottomOffset = addPanel ? addPanel.getBoundingClientRect().height : 0;
+  const visibleBottom = bodyRect.bottom - stickyBottomOffset - 12;
+  const visibleTop = bodyRect.top + 12;
+
+  if (rowRect.bottom > visibleBottom) {
+    modalBody.scrollTop += rowRect.bottom - visibleBottom;
+  } else if (rowRect.top < visibleTop) {
+    modalBody.scrollTop += rowRect.top - visibleTop;
   }
 }
 
