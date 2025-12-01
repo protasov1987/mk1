@@ -8,6 +8,7 @@ let workorderSearchTerm = '';
 let workorderStatusFilter = 'ALL';
 let workorderMissingExecutorFilter = 'ALL';
 let workorderAutoScrollEnabled = true;
+let suppressWorkorderAutoscroll = false;
 let archiveSearchTerm = '';
 let archiveStatusFilter = 'ALL';
 let apiOnline = false;
@@ -25,6 +26,7 @@ let logContextCardId = null;
 let clockIntervalId = null;
 const cardsGroupOpen = new Set();
 let groupExecutorContext = null;
+let dashboardStatusSnapshot = null;
 
 function setConnectionStatus(message, variant = 'info') {
   const banner = document.getElementById('server-status');
@@ -979,6 +981,13 @@ function renderDashboard() {
 
   const dashTableWrapper = document.getElementById('dashboard-cards');
   const eligibleCards = activeCards.filter(c => c.status !== 'NOT_STARTED');
+  const statusChanged = (() => {
+    if (!dashboardStatusSnapshot) return true;
+    if (dashboardStatusSnapshot.size !== eligibleCards.length) return true;
+    return eligibleCards.some(card => dashboardStatusSnapshot.get(card.id) !== card.status);
+  })();
+
+  dashboardStatusSnapshot = new Map(eligibleCards.map(card => [card.id, card.status]));
   const emptyMessage = '<p>Карт для отображения пока нет.</p>';
   const tableHeader = '<thead><tr><th>№ карты (EAN-13)</th><th>Наименование</th><th>Заказ</th><th>Статус / операции</th><th>Сделано деталей</th><th>Выполнено операций</th><th>Комментарии</th></tr></thead>';
 
@@ -991,6 +1000,13 @@ function renderDashboard() {
       });
     } else if (dashTableWrapper) {
       dashTableWrapper.innerHTML = emptyMessage;
+    }
+    return;
+  }
+
+  if (!statusChanged) {
+    if (window.dashboardPager && typeof window.dashboardPager.updatePages === 'function') {
+      window.dashboardPager.updatePages();
     }
     return;
   }
@@ -2703,7 +2719,7 @@ function buildWorkorderCardDetails(card, { opened = false, allowArchive = true, 
 }
 
 function scrollWorkorderDetailsIntoViewIfNeeded(detailsEl) {
-  if (!detailsEl || !workorderAutoScrollEnabled) return;
+  if (!detailsEl || !workorderAutoScrollEnabled || suppressWorkorderAutoscroll) return;
 
   requestAnimationFrame(() => {
     const rect = detailsEl.getBoundingClientRect();
@@ -3317,82 +3333,87 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
         workorderOpenCards.add(cardId);
       }
 
-      const prevStatus = op.status;
-      const prevElapsed = op.elapsedSeconds || 0;
-      const prevCardStatus = card.status;
+      suppressWorkorderAutoscroll = true;
+      try {
+        const prevStatus = op.status;
+        const prevElapsed = op.elapsedSeconds || 0;
+        const prevCardStatus = card.status;
 
-      if (action === 'start') {
-        const now = Date.now();
-        if (!op.firstStartedAt) op.firstStartedAt = now;
-        op.status = 'IN_PROGRESS';
-        op.startedAt = now;
-        op.lastPausedAt = null;
-        op.finishedAt = null;
-        op.actualSeconds = null;
-        op.elapsedSeconds = 0;
-      } else if (action === 'pause') {
-        if (op.status === 'IN_PROGRESS') {
+        if (action === 'start') {
           const now = Date.now();
-          const diff = op.startedAt ? (now - op.startedAt) / 1000 : 0;
-          op.elapsedSeconds = (op.elapsedSeconds || 0) + diff;
-          op.lastPausedAt = now;
+          if (!op.firstStartedAt) op.firstStartedAt = now;
+          op.status = 'IN_PROGRESS';
+          op.startedAt = now;
+          op.lastPausedAt = null;
+          op.finishedAt = null;
+          op.actualSeconds = null;
+          op.elapsedSeconds = 0;
+        } else if (action === 'pause') {
+          if (op.status === 'IN_PROGRESS') {
+            const now = Date.now();
+            const diff = op.startedAt ? (now - op.startedAt) / 1000 : 0;
+            op.elapsedSeconds = (op.elapsedSeconds || 0) + diff;
+            op.lastPausedAt = now;
+            op.startedAt = null;
+            op.status = 'PAUSED';
+          }
+        } else if (action === 'resume') {
+          const now = Date.now();
+          if (op.status === 'DONE' && typeof op.elapsedSeconds !== 'number') {
+            op.elapsedSeconds = op.actualSeconds || 0;
+          }
+          if (!op.firstStartedAt) op.firstStartedAt = now;
+          op.status = 'IN_PROGRESS';
+          op.startedAt = now;
+          op.lastPausedAt = null;
+          op.finishedAt = null;
+        } else if (action === 'stop') {
+          const now = Date.now();
+          if (op.status === 'IN_PROGRESS') {
+            const diff = op.startedAt ? (now - op.startedAt) / 1000 : 0;
+            op.elapsedSeconds = (op.elapsedSeconds || 0) + diff;
+          }
+          const qtyTotal = getOperationQuantity(op, card);
+          if (card.useItemList) {
+            normalizeOperationItems(card, op);
+            const wrongItem = (op.items || []).find(item => {
+              const expected = item.quantity != null ? item.quantity : 1;
+              const total = toSafeCount(item.goodCount || 0) + toSafeCount(item.scrapCount || 0) + toSafeCount(item.holdCount || 0);
+              return expected > 0 && total !== expected;
+            });
+            if (wrongItem) {
+              alert('Количество по изделию "' + (wrongItem.name || 'Изделие') + '" не совпадает');
+              return;
+            }
+          } else if (qtyTotal > 0) {
+            const sum = toSafeCount(op.goodCount || 0) + toSafeCount(op.scrapCount || 0) + toSafeCount(op.holdCount || 0);
+            if (sum !== qtyTotal) {
+              alert('Количество деталей не совпадает');
+              return;
+            }
+          }
           op.startedAt = null;
-          op.status = 'PAUSED';
+          op.finishedAt = now;
+          op.lastPausedAt = null;
+          op.actualSeconds = op.elapsedSeconds || 0;
+          op.status = 'DONE';
         }
-      } else if (action === 'resume') {
-        const now = Date.now();
-        if (op.status === 'DONE' && typeof op.elapsedSeconds !== 'number') {
-          op.elapsedSeconds = op.actualSeconds || 0;
-        }
-        if (!op.firstStartedAt) op.firstStartedAt = now;
-        op.status = 'IN_PROGRESS';
-        op.startedAt = now;
-        op.lastPausedAt = null;
-        op.finishedAt = null;
-      } else if (action === 'stop') {
-        const now = Date.now();
-        if (op.status === 'IN_PROGRESS') {
-          const diff = op.startedAt ? (now - op.startedAt) / 1000 : 0;
-          op.elapsedSeconds = (op.elapsedSeconds || 0) + diff;
-        }
-        const qtyTotal = getOperationQuantity(op, card);
-        if (card.useItemList) {
-          normalizeOperationItems(card, op);
-          const wrongItem = (op.items || []).find(item => {
-            const expected = item.quantity != null ? item.quantity : 1;
-            const total = toSafeCount(item.goodCount || 0) + toSafeCount(item.scrapCount || 0) + toSafeCount(item.holdCount || 0);
-            return expected > 0 && total !== expected;
-          });
-          if (wrongItem) {
-            alert('Количество по изделию "' + (wrongItem.name || 'Изделие') + '" не совпадает');
-            return;
-          }
-        } else if (qtyTotal > 0) {
-          const sum = toSafeCount(op.goodCount || 0) + toSafeCount(op.scrapCount || 0) + toSafeCount(op.holdCount || 0);
-          if (sum !== qtyTotal) {
-            alert('Количество деталей не совпадает');
-            return;
-          }
-        }
-        op.startedAt = null;
-        op.finishedAt = now;
-        op.lastPausedAt = null;
-        op.actualSeconds = op.elapsedSeconds || 0;
-        op.status = 'DONE';
-      }
 
-      recalcCardStatus(card);
-      if (prevStatus !== op.status) {
-        recordCardLog(card, { action: 'Статус операции', object: opLogLabel(op), field: 'status', targetId: op.id, oldValue: prevStatus, newValue: op.status });
+        recalcCardStatus(card);
+        if (prevStatus !== op.status) {
+          recordCardLog(card, { action: 'Статус операции', object: opLogLabel(op), field: 'status', targetId: op.id, oldValue: prevStatus, newValue: op.status });
+        }
+        if (prevElapsed !== op.elapsedSeconds && op.status === 'DONE') {
+          recordCardLog(card, { action: 'Факт. время', object: opLogLabel(op), field: 'elapsedSeconds', targetId: op.id, oldValue: Math.round(prevElapsed), newValue: Math.round(op.elapsedSeconds || 0) });
+        }
+        if (prevCardStatus !== card.status) {
+          recordCardLog(card, { action: 'Статус карты', object: 'Карта', field: 'status', oldValue: prevCardStatus, newValue: card.status });
+        }
+        saveData();
+        renderEverything();
+      } finally {
+        suppressWorkorderAutoscroll = false;
       }
-      if (prevElapsed !== op.elapsedSeconds && op.status === 'DONE') {
-        recordCardLog(card, { action: 'Факт. время', object: opLogLabel(op), field: 'elapsedSeconds', targetId: op.id, oldValue: Math.round(prevElapsed), newValue: Math.round(op.elapsedSeconds || 0) });
-      }
-      if (prevCardStatus !== card.status) {
-        recordCardLog(card, { action: 'Статус карты', object: 'Карта', field: 'status', oldValue: prevCardStatus, newValue: card.status });
-      }
-      saveData();
-      renderEverything();
     });
   });
 }
