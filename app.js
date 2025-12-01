@@ -3726,13 +3726,6 @@ function setupForms() {
     groupCancelBtn.addEventListener('click', () => closeGroupModal());
   }
 
-  const groupModal = document.getElementById('group-modal');
-  if (groupModal) {
-    groupModal.addEventListener('click', (e) => {
-      if (e.target === groupModal) closeGroupModal();
-    });
-  }
-
   document.getElementById('route-form').addEventListener('submit', e => {
     e.preventDefault();
     if (!activeCardDraft) return;
