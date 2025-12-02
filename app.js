@@ -2738,6 +2738,7 @@ function buildWorkorderCardDetails(card, { opened = false, allowArchive = true, 
 function scrollWorkorderDetailsIntoViewIfNeeded(detailsEl) {
   if (!detailsEl || !workorderAutoScrollEnabled || suppressWorkorderAutoscroll) return;
 
+  // Автоскролл существует только для удобного просмотра именно что раскрытой карточки/группы.
   requestAnimationFrame(() => {
     if (suppressWorkorderAutoscroll) return;
     const rect = detailsEl.getBoundingClientRect();
@@ -2755,6 +2756,18 @@ function scrollWorkorderDetailsIntoViewIfNeeded(detailsEl) {
       behavior: 'smooth',
     });
   });
+}
+
+function markWorkorderToggleState(detail) {
+  detail.dataset.wasOpen = detail.open ? 'true' : 'false';
+}
+
+function shouldScrollAfterWorkorderToggle(detail) {
+  const wasOpen = detail.dataset.wasOpen === 'true';
+  const nowOpen = detail.open;
+  detail.dataset.wasOpen = nowOpen ? 'true' : 'false';
+  // Скроллим только при переходе «было закрыто → стало открыто».
+  return nowOpen && !wasOpen;
 }
 
 function findWorkorderDetail({ cardId = null, groupId = null } = {}) {
@@ -3098,13 +3111,18 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
     if (detail.open && groupId) {
       workorderOpenGroups.add(groupId);
     }
+    markWorkorderToggleState(detail);
     detail.addEventListener('toggle', () => {
       if (!groupId) return;
       if (detail.open) {
         workorderOpenGroups.add(groupId);
-        scrollWorkorderDetailsIntoViewIfNeeded(detail);
+        if (shouldScrollAfterWorkorderToggle(detail)) {
+          // Автоскролл только после раскрытия ранее закрытой группы.
+          scrollWorkorderDetailsIntoViewIfNeeded(detail);
+        }
       } else {
         workorderOpenGroups.delete(groupId);
+        markWorkorderToggleState(detail);
       }
     });
   });
@@ -3114,13 +3132,18 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
     if (detail.open && cardId) {
       workorderOpenCards.add(cardId);
     }
+    markWorkorderToggleState(detail);
     detail.addEventListener('toggle', () => {
       if (!cardId) return;
       if (detail.open) {
         workorderOpenCards.add(cardId);
-        scrollWorkorderDetailsIntoViewIfNeeded(detail);
+        if (shouldScrollAfterWorkorderToggle(detail)) {
+          // Скроллим только в момент раскрытия закрытой карточки.
+          scrollWorkorderDetailsIntoViewIfNeeded(detail);
+        }
       } else {
         workorderOpenCards.delete(cardId);
+        markWorkorderToggleState(detail);
       }
     });
   });
