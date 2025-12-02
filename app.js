@@ -2757,12 +2757,33 @@ function scrollWorkorderDetailsIntoViewIfNeeded(detailsEl) {
   });
 }
 
-function withWorkorderScrollLock(cb) {
+function findWorkorderDetail({ cardId = null, groupId = null } = {}) {
+  if (cardId) {
+    return document.querySelector('.wo-card[data-card-id="' + cardId + '"]');
+  }
+  if (groupId) {
+    return document.querySelector('.wo-card[data-group-id="' + groupId + '"]');
+  }
+  return null;
+}
+
+function withWorkorderScrollLock(cb, { anchorCardId = null, anchorGroupId = null } = {}) {
+  const anchorEl = anchorCardId || anchorGroupId ? findWorkorderDetail({ cardId: anchorCardId, groupId: anchorGroupId }) : null;
+  const anchorTop = anchorEl ? anchorEl.getBoundingClientRect().top : null;
   const prevX = window.scrollX;
   const prevY = window.scrollY;
   cb();
   if (!suppressWorkorderAutoscroll) return;
   requestAnimationFrame(() => {
+    if (anchorTop != null) {
+      const freshAnchor = findWorkorderDetail({ cardId: anchorCardId, groupId: anchorGroupId });
+      if (freshAnchor) {
+        const newTop = freshAnchor.getBoundingClientRect().top;
+        const delta = newTop - anchorTop;
+        window.scrollTo({ left: prevX, top: window.scrollY + delta });
+        return;
+      }
+    }
     window.scrollTo({ left: prevX, top: prevY });
   });
 }
@@ -3243,6 +3264,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       if (!card || !op) return;
       if (!Array.isArray(op.additionalExecutors)) op.additionalExecutors = [];
       if (op.additionalExecutors.length >= 2) return;
+      const anchorGroupId = btn.closest('.wo-card') ? btn.closest('.wo-card').getAttribute('data-group-id') : null;
       suppressWorkorderAutoscroll = true;
       try {
         withWorkorderScrollLock(() => {
@@ -3251,7 +3273,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
           saveData();
           workorderOpenCards.add(cardId);
           renderWorkordersTable();
-        });
+        }, { anchorCardId: cardId, anchorGroupId });
       } finally {
         suppressWorkorderAutoscroll = false;
       }
@@ -3267,6 +3289,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       const op = card ? (card.operations || []).find(o => o.id === opId) : null;
       if (!card || !op || !Array.isArray(op.additionalExecutors)) return;
       if (idx < 0 || idx >= op.additionalExecutors.length) return;
+      const anchorGroupId = btn.closest('.wo-card') ? btn.closest('.wo-card').getAttribute('data-group-id') : null;
       suppressWorkorderAutoscroll = true;
       try {
         withWorkorderScrollLock(() => {
@@ -3275,7 +3298,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
           saveData();
           workorderOpenCards.add(cardId);
           renderWorkordersTable();
-        });
+        }, { anchorCardId: cardId, anchorGroupId });
       } finally {
         suppressWorkorderAutoscroll = false;
       }
@@ -3377,6 +3400,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
         workorderOpenCards.add(cardId);
       }
 
+      const anchorGroupId = detail ? detail.getAttribute('data-group-id') : null;
       suppressWorkorderAutoscroll = true;
       try {
         const prevStatus = op.status;
@@ -3456,7 +3480,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
           }
           saveData();
           renderEverything();
-        });
+        }, { anchorCardId: cardId, anchorGroupId });
       } finally {
         suppressWorkorderAutoscroll = false;
       }
