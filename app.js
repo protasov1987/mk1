@@ -27,6 +27,7 @@ let clockIntervalId = null;
 const cardsGroupOpen = new Set();
 let groupExecutorContext = null;
 let dashboardStatusSnapshot = null;
+let dashboardEligibleCache = [];
 
 function setConnectionStatus(message, variant = 'info') {
   const banner = document.getElementById('server-status');
@@ -980,14 +981,30 @@ function renderDashboard() {
   });
 
   const dashTableWrapper = document.getElementById('dashboard-cards');
-  const eligibleCards = activeCards.filter(c => c.status !== 'NOT_STARTED');
-  const statusChanged = (() => {
-    if (!dashboardStatusSnapshot) return true;
-    if (dashboardStatusSnapshot.size !== eligibleCards.length) return true;
-    return eligibleCards.some(card => dashboardStatusSnapshot.get(card.id) !== card.status);
+  const currentStatusSnapshot = (() => {
+    const map = new Map();
+    cards.forEach(card => {
+      if (card && !card.archived) {
+        map.set(card.id, card.status || 'NOT_STARTED');
+      }
+    });
+    return map;
   })();
 
-  dashboardStatusSnapshot = new Map(eligibleCards.map(card => [card.id, card.status]));
+  const statusChanged = (() => {
+    if (!dashboardStatusSnapshot) return true;
+    if (dashboardStatusSnapshot.size !== currentStatusSnapshot.size) return true;
+    for (const [id, status] of currentStatusSnapshot.entries()) {
+      if (dashboardStatusSnapshot.get(id) !== status) return true;
+    }
+    return false;
+  })();
+
+  dashboardStatusSnapshot = currentStatusSnapshot;
+  if (statusChanged) {
+    dashboardEligibleCache = activeCards.filter(c => c.status !== 'NOT_STARTED');
+  }
+  const eligibleCards = dashboardEligibleCache;
   const emptyMessage = '<p>Карт для отображения пока нет.</p>';
   const tableHeader = '<thead><tr><th>№ карты (EAN-13)</th><th>Наименование</th><th>Заказ</th><th>Статус / операции</th><th>Сделано деталей</th><th>Выполнено операций</th><th>Комментарии</th></tr></thead>';
 
@@ -2722,6 +2739,7 @@ function scrollWorkorderDetailsIntoViewIfNeeded(detailsEl) {
   if (!detailsEl || !workorderAutoScrollEnabled || suppressWorkorderAutoscroll) return;
 
   requestAnimationFrame(() => {
+    if (suppressWorkorderAutoscroll) return;
     const rect = detailsEl.getBoundingClientRect();
     if (rect.bottom <= window.innerHeight) return;
 
@@ -3213,11 +3231,16 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       if (!card || !op) return;
       if (!Array.isArray(op.additionalExecutors)) op.additionalExecutors = [];
       if (op.additionalExecutors.length >= 2) return;
-      op.additionalExecutors.push('');
-      recordCardLog(card, { action: 'Доп. исполнитель', object: opLogLabel(op), field: 'additionalExecutors', targetId: op.id, oldValue: op.additionalExecutors.length - 1, newValue: op.additionalExecutors.length });
-      saveData();
-      workorderOpenCards.add(cardId);
-      renderWorkordersTable();
+      suppressWorkorderAutoscroll = true;
+      try {
+        op.additionalExecutors.push('');
+        recordCardLog(card, { action: 'Доп. исполнитель', object: opLogLabel(op), field: 'additionalExecutors', targetId: op.id, oldValue: op.additionalExecutors.length - 1, newValue: op.additionalExecutors.length });
+        saveData();
+        workorderOpenCards.add(cardId);
+        renderWorkordersTable();
+      } finally {
+        suppressWorkorderAutoscroll = false;
+      }
     });
   });
 
@@ -3230,11 +3253,16 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       const op = card ? (card.operations || []).find(o => o.id === opId) : null;
       if (!card || !op || !Array.isArray(op.additionalExecutors)) return;
       if (idx < 0 || idx >= op.additionalExecutors.length) return;
-      const removed = op.additionalExecutors.splice(idx, 1)[0];
-      recordCardLog(card, { action: 'Доп. исполнитель', object: opLogLabel(op), field: 'additionalExecutors', targetId: op.id, oldValue: removed, newValue: 'удален' });
-      saveData();
-      workorderOpenCards.add(cardId);
-      renderWorkordersTable();
+      suppressWorkorderAutoscroll = true;
+      try {
+        const removed = op.additionalExecutors.splice(idx, 1)[0];
+        recordCardLog(card, { action: 'Доп. исполнитель', object: opLogLabel(op), field: 'additionalExecutors', targetId: op.id, oldValue: removed, newValue: 'удален' });
+        saveData();
+        workorderOpenCards.add(cardId);
+        renderWorkordersTable();
+      } finally {
+        suppressWorkorderAutoscroll = false;
+      }
     });
   });
 
