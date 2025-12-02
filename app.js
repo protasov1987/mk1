@@ -2741,17 +2741,29 @@ function scrollWorkorderDetailsIntoViewIfNeeded(detailsEl) {
   requestAnimationFrame(() => {
     if (suppressWorkorderAutoscroll) return;
     const rect = detailsEl.getBoundingClientRect();
-    if (rect.bottom <= window.innerHeight) return;
-
     const header = document.querySelector('header');
     const headerOffset = header ? header.getBoundingClientRect().height : 0;
     const offset = headerOffset + 16;
+
+    const needsScrollDown = rect.bottom > window.innerHeight;
+    const needsScrollUp = rect.top < offset;
+    if (!needsScrollDown && !needsScrollUp) return;
     const targetTop = window.scrollY + rect.top - offset;
 
     window.scrollTo({
       top: targetTop,
       behavior: 'smooth',
     });
+  });
+}
+
+function withWorkorderScrollLock(cb) {
+  const prevX = window.scrollX;
+  const prevY = window.scrollY;
+  cb();
+  if (!suppressWorkorderAutoscroll) return;
+  requestAnimationFrame(() => {
+    window.scrollTo({ left: prevX, top: prevY });
   });
 }
 
@@ -3233,11 +3245,13 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       if (op.additionalExecutors.length >= 2) return;
       suppressWorkorderAutoscroll = true;
       try {
-        op.additionalExecutors.push('');
-        recordCardLog(card, { action: 'Доп. исполнитель', object: opLogLabel(op), field: 'additionalExecutors', targetId: op.id, oldValue: op.additionalExecutors.length - 1, newValue: op.additionalExecutors.length });
-        saveData();
-        workorderOpenCards.add(cardId);
-        renderWorkordersTable();
+        withWorkorderScrollLock(() => {
+          op.additionalExecutors.push('');
+          recordCardLog(card, { action: 'Доп. исполнитель', object: opLogLabel(op), field: 'additionalExecutors', targetId: op.id, oldValue: op.additionalExecutors.length - 1, newValue: op.additionalExecutors.length });
+          saveData();
+          workorderOpenCards.add(cardId);
+          renderWorkordersTable();
+        });
       } finally {
         suppressWorkorderAutoscroll = false;
       }
@@ -3255,11 +3269,13 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       if (idx < 0 || idx >= op.additionalExecutors.length) return;
       suppressWorkorderAutoscroll = true;
       try {
-        const removed = op.additionalExecutors.splice(idx, 1)[0];
-        recordCardLog(card, { action: 'Доп. исполнитель', object: opLogLabel(op), field: 'additionalExecutors', targetId: op.id, oldValue: removed, newValue: 'удален' });
-        saveData();
-        workorderOpenCards.add(cardId);
-        renderWorkordersTable();
+        withWorkorderScrollLock(() => {
+          const removed = op.additionalExecutors.splice(idx, 1)[0];
+          recordCardLog(card, { action: 'Доп. исполнитель', object: opLogLabel(op), field: 'additionalExecutors', targetId: op.id, oldValue: removed, newValue: 'удален' });
+          saveData();
+          workorderOpenCards.add(cardId);
+          renderWorkordersTable();
+        });
       } finally {
         suppressWorkorderAutoscroll = false;
       }
@@ -3367,78 +3383,80 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
         const prevElapsed = op.elapsedSeconds || 0;
         const prevCardStatus = card.status;
 
-        if (action === 'start') {
-          const now = Date.now();
-          if (!op.firstStartedAt) op.firstStartedAt = now;
-          op.status = 'IN_PROGRESS';
-          op.startedAt = now;
-          op.lastPausedAt = null;
-          op.finishedAt = null;
-          op.actualSeconds = null;
-          op.elapsedSeconds = 0;
-        } else if (action === 'pause') {
-          if (op.status === 'IN_PROGRESS') {
+        withWorkorderScrollLock(() => {
+          if (action === 'start') {
             const now = Date.now();
-            const diff = op.startedAt ? (now - op.startedAt) / 1000 : 0;
-            op.elapsedSeconds = (op.elapsedSeconds || 0) + diff;
-            op.lastPausedAt = now;
+            if (!op.firstStartedAt) op.firstStartedAt = now;
+            op.status = 'IN_PROGRESS';
+            op.startedAt = now;
+            op.lastPausedAt = null;
+            op.finishedAt = null;
+            op.actualSeconds = null;
+            op.elapsedSeconds = 0;
+          } else if (action === 'pause') {
+            if (op.status === 'IN_PROGRESS') {
+              const now = Date.now();
+              const diff = op.startedAt ? (now - op.startedAt) / 1000 : 0;
+              op.elapsedSeconds = (op.elapsedSeconds || 0) + diff;
+              op.lastPausedAt = now;
+              op.startedAt = null;
+              op.status = 'PAUSED';
+            }
+          } else if (action === 'resume') {
+            const now = Date.now();
+            if (op.status === 'DONE' && typeof op.elapsedSeconds !== 'number') {
+              op.elapsedSeconds = op.actualSeconds || 0;
+            }
+            if (!op.firstStartedAt) op.firstStartedAt = now;
+            op.status = 'IN_PROGRESS';
+            op.startedAt = now;
+            op.lastPausedAt = null;
+            op.finishedAt = null;
+          } else if (action === 'stop') {
+            const now = Date.now();
+            if (op.status === 'IN_PROGRESS') {
+              const diff = op.startedAt ? (now - op.startedAt) / 1000 : 0;
+              op.elapsedSeconds = (op.elapsedSeconds || 0) + diff;
+            }
+            const qtyTotal = getOperationQuantity(op, card);
+            if (card.useItemList) {
+              normalizeOperationItems(card, op);
+              const wrongItem = (op.items || []).find(item => {
+                const expected = item.quantity != null ? item.quantity : 1;
+                const total = toSafeCount(item.goodCount || 0) + toSafeCount(item.scrapCount || 0) + toSafeCount(item.holdCount || 0);
+                return expected > 0 && total !== expected;
+              });
+              if (wrongItem) {
+                alert('Количество по изделию "' + (wrongItem.name || 'Изделие') + '" не совпадает');
+                return;
+              }
+            } else if (qtyTotal > 0) {
+              const sum = toSafeCount(op.goodCount || 0) + toSafeCount(op.scrapCount || 0) + toSafeCount(op.holdCount || 0);
+              if (sum !== qtyTotal) {
+                alert('Количество деталей не совпадает');
+                return;
+              }
+            }
             op.startedAt = null;
-            op.status = 'PAUSED';
+            op.finishedAt = now;
+            op.lastPausedAt = null;
+            op.actualSeconds = op.elapsedSeconds || 0;
+            op.status = 'DONE';
           }
-        } else if (action === 'resume') {
-          const now = Date.now();
-          if (op.status === 'DONE' && typeof op.elapsedSeconds !== 'number') {
-            op.elapsedSeconds = op.actualSeconds || 0;
-          }
-          if (!op.firstStartedAt) op.firstStartedAt = now;
-          op.status = 'IN_PROGRESS';
-          op.startedAt = now;
-          op.lastPausedAt = null;
-          op.finishedAt = null;
-        } else if (action === 'stop') {
-          const now = Date.now();
-          if (op.status === 'IN_PROGRESS') {
-            const diff = op.startedAt ? (now - op.startedAt) / 1000 : 0;
-            op.elapsedSeconds = (op.elapsedSeconds || 0) + diff;
-          }
-          const qtyTotal = getOperationQuantity(op, card);
-          if (card.useItemList) {
-            normalizeOperationItems(card, op);
-            const wrongItem = (op.items || []).find(item => {
-              const expected = item.quantity != null ? item.quantity : 1;
-              const total = toSafeCount(item.goodCount || 0) + toSafeCount(item.scrapCount || 0) + toSafeCount(item.holdCount || 0);
-              return expected > 0 && total !== expected;
-            });
-            if (wrongItem) {
-              alert('Количество по изделию "' + (wrongItem.name || 'Изделие') + '" не совпадает');
-              return;
-            }
-          } else if (qtyTotal > 0) {
-            const sum = toSafeCount(op.goodCount || 0) + toSafeCount(op.scrapCount || 0) + toSafeCount(op.holdCount || 0);
-            if (sum !== qtyTotal) {
-              alert('Количество деталей не совпадает');
-              return;
-            }
-          }
-          op.startedAt = null;
-          op.finishedAt = now;
-          op.lastPausedAt = null;
-          op.actualSeconds = op.elapsedSeconds || 0;
-          op.status = 'DONE';
-        }
 
-        recalcCardStatus(card);
-        if (prevStatus !== op.status) {
-          recordCardLog(card, { action: 'Статус операции', object: opLogLabel(op), field: 'status', targetId: op.id, oldValue: prevStatus, newValue: op.status });
-        }
-        if (prevElapsed !== op.elapsedSeconds && op.status === 'DONE') {
-          recordCardLog(card, { action: 'Факт. время', object: opLogLabel(op), field: 'elapsedSeconds', targetId: op.id, oldValue: Math.round(prevElapsed), newValue: Math.round(op.elapsedSeconds || 0) });
-        }
-        if (prevCardStatus !== card.status) {
-          recordCardLog(card, { action: 'Статус карты', object: 'Карта', field: 'status', oldValue: prevCardStatus, newValue: card.status });
-        }
-        saveData();
-        renderEverything();
+          recalcCardStatus(card);
+          if (prevStatus !== op.status) {
+            recordCardLog(card, { action: 'Статус операции', object: opLogLabel(op), field: 'status', targetId: op.id, oldValue: prevStatus, newValue: op.status });
+          }
+          if (prevElapsed !== op.elapsedSeconds && op.status === 'DONE') {
+            recordCardLog(card, { action: 'Факт. время', object: opLogLabel(op), field: 'elapsedSeconds', targetId: op.id, oldValue: Math.round(prevElapsed), newValue: Math.round(op.elapsedSeconds || 0) });
+          }
+          if (prevCardStatus !== card.status) {
+            recordCardLog(card, { action: 'Статус карты', object: 'Карта', field: 'status', oldValue: prevCardStatus, newValue: card.status });
+          }
+          saveData();
+          renderEverything();
+        });
       } finally {
         suppressWorkorderAutoscroll = false;
       }
