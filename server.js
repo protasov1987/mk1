@@ -2,6 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
+const crypto = require('crypto');
 const { JsonDatabase, deepClone } = require('./db');
 
 const PORT = process.env.PORT || 8000;
@@ -11,6 +12,9 @@ const DATA_FILE = path.join(DATA_DIR, 'database.json');
 const MAX_BODY_SIZE = 20 * 1024 * 1024; // 20 MB to allow attachments
 const FILE_SIZE_LIMIT = 15 * 1024 * 1024; // 15 MB per attachment
 const ALLOWED_EXTENSIONS = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.zip', '.rar', '.7z'];
+const MIN_PASSWORD_LENGTH = 6;
+const ADMIN_LOGIN_NAME = 'Abyss';
+const ADMIN_PASSWORD = 'ssyba';
 
 function genId(prefix) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`;
@@ -140,7 +144,155 @@ function buildDefaultData() {
     }
   ];
 
-  return { cards, ops, centers };
+  const adminLevelId = genId('al');
+  const accessLevels = [
+    {
+      id: adminLevelId,
+      name: 'Администратор',
+      description: 'Полный доступ ко всем разделам',
+      permissions: {
+        dashboard: { view: true, change: true },
+        cards: { view: true, change: true },
+        workorders: { view: true, change: true },
+        archive: { view: true, change: true },
+        workspace: { view: true, change: true },
+        users: { view: true, change: true },
+        accessLevels: { view: true, change: true },
+        attachments: { upload: true, remove: true }
+      },
+      landingTab: 'dashboard',
+      idleTimeoutMinutes: 30,
+      isWorker: false
+    }
+  ];
+
+  const users = [
+    {
+      id: genId('usr'),
+      name: 'Abyss',
+      password: 'ssyba',
+      accessLevelId: adminLevelId,
+      active: true,
+      createdAt: Date.now()
+    }
+  ];
+
+  return { cards, ops, centers, users, accessLevels };
+}
+
+// === БЕЗОПАСНОСТЬ ===
+const sessions = new Map();
+
+function getAccessLevel(data, id) {
+  return (data.accessLevels || []).find(level => level.id === id) || null;
+}
+
+function validatePassword(password) {
+  if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
+    return false;
+  }
+  const hasLetter = /[A-Za-zА-Яа-я]/.test(password);
+  const hasDigit = /\d/.test(password);
+  return hasLetter && hasDigit;
+}
+
+function isPasswordUnique(data, password, excludeUserId = null) {
+  return !(data.users || []).some(u => u.password === password && u.id !== excludeUserId);
+}
+
+function ensureAdminPresence(data) {
+  const accessLevels = Array.isArray(data.accessLevels) ? data.accessLevels : [];
+  const users = Array.isArray(data.users) ? data.users : [];
+  let adminLevel = accessLevels.find(lvl => lvl.name === 'Администратор');
+  if (!adminLevel) {
+    adminLevel = {
+      id: genId('al'),
+      name: 'Администратор',
+      description: 'Полный доступ ко всем разделам',
+      permissions: {
+        dashboard: { view: true, change: true },
+        cards: { view: true, change: true },
+        workorders: { view: true, change: true },
+        archive: { view: true, change: true },
+        workspace: { view: true, change: true },
+        users: { view: true, change: true },
+        accessLevels: { view: true, change: true },
+        attachments: { upload: true, remove: true }
+      },
+      landingTab: 'dashboard',
+      idleTimeoutMinutes: 30,
+      isWorker: false
+    };
+    accessLevels.push(adminLevel);
+  }
+
+  if (!users.length) {
+    users.push({
+      id: genId('usr'),
+      name: ADMIN_LOGIN_NAME,
+      password: ADMIN_PASSWORD,
+      accessLevelId: adminLevel.id,
+      active: true,
+      createdAt: Date.now()
+    });
+  }
+
+  data.users = users;
+  data.accessLevels = accessLevels;
+  return data;
+}
+
+function createSession(user, level) {
+  const token = crypto.randomUUID ? crypto.randomUUID() : genId('sess');
+  const idleMs = Math.max(1, level && level.idleTimeoutMinutes ? level.idleTimeoutMinutes : 30) * 60 * 1000;
+  const entry = { token, userId: user.id, lastSeen: Date.now(), idleMs };
+  sessions.set(token, entry);
+  return entry;
+}
+
+function getSession(token) {
+  if (!token || !sessions.has(token)) return null;
+  const sess = sessions.get(token);
+  if (!sess) return null;
+  if (Date.now() - sess.lastSeen > sess.idleMs) {
+    sessions.delete(token);
+    return null;
+  }
+  sess.lastSeen = Date.now();
+  sessions.set(token, sess);
+  return sess;
+}
+
+function readToken(req) {
+  return req.headers['x-session-token'] || req.headers['X-Session-Token'] || req.headers['x-session-token'];
+}
+
+async function requireSession(req, res, { permission, allowInactive = false } = {}) {
+  const token = readToken(req);
+  const sess = getSession(token);
+  if (!sess) {
+    sendJson(res, 401, { error: 'Unauthorized' });
+    return null;
+  }
+  const data = await database.getData();
+  const user = (data.users || []).find(u => u.id === sess.userId);
+  if (!user || (!allowInactive && user.active === false)) {
+    sendJson(res, 401, { error: 'Unauthorized' });
+    return null;
+  }
+  const level = getAccessLevel(data, user.accessLevelId);
+  if (permission && !hasPermission(level, permission)) {
+    sendJson(res, 403, { error: 'Forbidden' });
+    return null;
+  }
+  return { user, level, data };
+}
+
+function hasPermission(level, permission) {
+  if (!permission) return true;
+  const perms = (level && level.permissions) || {};
+  const area = perms[permission.area] || {};
+  return Boolean(area[permission.type]);
 }
 
 function sendJson(res, statusCode, data) {
@@ -323,7 +475,9 @@ function normalizeData(payload) {
   const safe = {
     cards: Array.isArray(payload.cards) ? payload.cards.map(normalizeCard) : [],
     ops: Array.isArray(payload.ops) ? payload.ops : [],
-    centers: Array.isArray(payload.centers) ? payload.centers : []
+    centers: Array.isArray(payload.centers) ? payload.centers : [],
+    users: Array.isArray(payload.users) ? payload.users : [],
+    accessLevels: Array.isArray(payload.accessLevels) ? payload.accessLevels : []
   };
   ensureOperationCodes(safe);
   safe.cards = safe.cards.map(card => {
@@ -362,22 +516,263 @@ function mergeSnapshots(existingData, incomingData) {
 
 const database = new JsonDatabase(DATA_FILE);
 
+function sanitizeUser(user) {
+  const copy = { ...user };
+  delete copy.password;
+  return copy;
+}
+
+function normalizePermissions(perms = {}) {
+  return {
+    dashboard: { view: Boolean(perms.dashboard?.view), change: Boolean(perms.dashboard?.change) },
+    cards: { view: Boolean(perms.cards?.view), change: Boolean(perms.cards?.change) },
+    workorders: { view: Boolean(perms.workorders?.view), change: Boolean(perms.workorders?.change) },
+    archive: { view: Boolean(perms.archive?.view), change: Boolean(perms.archive?.change) },
+    workspace: { view: Boolean(perms.workspace?.view), change: Boolean(perms.workspace?.change) },
+    users: { view: Boolean(perms.users?.view), change: Boolean(perms.users?.change) },
+    accessLevels: { view: Boolean(perms.accessLevels?.view), change: Boolean(perms.accessLevels?.change) },
+    attachments: { upload: Boolean(perms.attachments?.upload), remove: Boolean(perms.attachments?.remove) }
+  };
+}
+
 async function handleApi(req, res) {
-  if (req.method === 'GET' && req.url.startsWith('/api/data')) {
-    const data = await database.getData();
-    sendJson(res, 200, data);
+  const parsed = url.parse(req.url, true);
+  const pathname = parsed.pathname || '';
+
+  if (req.method === 'POST' && pathname === '/api/login') {
+    try {
+      const raw = await parseBody(req);
+      const payload = JSON.parse(raw || '{}');
+      const password = (payload.password || '').trim();
+      const data = await database.update(current => ensureAdminPresence(normalizeData(current)));
+      const user = (data.users || []).find(u => u.password === password && u.active !== false);
+      if (!user) {
+        sendJson(res, 401, { error: 'Неверный пароль' });
+        return true;
+      }
+      const level = getAccessLevel(data, user.accessLevelId);
+      const session = createSession(user, level);
+      sendJson(res, 200, { token: session.token, user: sanitizeUser(user), accessLevel: level });
+    } catch (err) {
+      sendJson(res, 400, { error: 'Некорректный запрос' });
+    }
     return true;
   }
 
-  if (req.method === 'POST' && req.url.startsWith('/api/data')) {
+  if (req.method === 'POST' && pathname === '/api/logout') {
+    const token = readToken(req);
+    if (token) sessions.delete(token);
+    sendJson(res, 200, { status: 'ok' });
+    return true;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/me') {
+    const session = await requireSession(req, res);
+    if (!session) return true;
+    sendJson(res, 200, { user: sanitizeUser(session.user), accessLevel: session.level });
+    return true;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/users') {
+    const session = await requireSession(req, res, { permission: { area: 'users', type: 'view' } });
+    if (!session) return true;
+    sendJson(res, 200, { users: session.data.users || [] });
+    return true;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/users') {
+    const session = await requireSession(req, res, { permission: { area: 'users', type: 'change' } });
+    if (!session) return true;
     try {
       const raw = await parseBody(req);
-      const parsed = JSON.parse(raw || '{}');
+      const payload = JSON.parse(raw || '{}');
+      const name = (payload.name || '').trim();
+      const password = (payload.password || '').trim();
+      const accessLevelId = payload.accessLevelId;
+      const active = payload.active !== false;
+      if (!name || !validatePassword(password)) {
+        sendJson(res, 400, { error: 'Некорректные имя или пароль' });
+        return true;
+      }
       const saved = await database.update(current => {
-        const normalized = normalizeData(parsed);
-        return mergeSnapshots(current, normalized);
+        const data = ensureAdminPresence(normalizeData(current));
+        if (!isPasswordUnique(data, password)) {
+          throw new Error('Пароль уже используется');
+        }
+        data.users.push({
+          id: genId('usr'),
+          name,
+          password,
+          accessLevelId,
+          active,
+          createdAt: Date.now()
+        });
+        return data;
       });
-      sendJson(res, 200, { status: 'ok', data: saved });
+      sendJson(res, 200, { status: 'ok', users: saved.users || [] });
+    } catch (err) {
+      sendJson(res, 400, { error: err.message || 'Ошибка сохранения пользователя' });
+    }
+    return true;
+  }
+
+  if (req.method === 'PUT' && pathname.startsWith('/api/users/')) {
+    const session = await requireSession(req, res, { permission: { area: 'users', type: 'change' } });
+    if (!session) return true;
+    const userId = pathname.split('/').pop();
+    try {
+      const raw = await parseBody(req);
+      const payload = JSON.parse(raw || '{}');
+      const password = payload.password != null ? String(payload.password).trim() : null;
+      const name = payload.name != null ? String(payload.name).trim() : null;
+      const active = payload.active;
+      const accessLevelId = payload.accessLevelId;
+      const saved = await database.update(current => {
+        const data = ensureAdminPresence(normalizeData(current));
+        const target = (data.users || []).find(u => u.id === userId);
+        if (!target) throw new Error('Пользователь не найден');
+        if (target.name === ADMIN_LOGIN_NAME && password && password !== target.password) {
+          throw new Error('Пароль администратора нельзя изменить');
+        }
+        if (password) {
+          if (!validatePassword(password)) throw new Error('Некорректный пароль');
+          if (!isPasswordUnique(data, password, target.id)) throw new Error('Пароль уже используется');
+          target.password = password;
+        }
+        if (name) target.name = name;
+        if (accessLevelId) target.accessLevelId = accessLevelId;
+        if (active != null) target.active = Boolean(active);
+        return data;
+      });
+      sendJson(res, 200, { status: 'ok', users: saved.users || [] });
+    } catch (err) {
+      sendJson(res, 400, { error: err.message || 'Ошибка обновления пользователя' });
+    }
+    return true;
+  }
+
+  if (req.method === 'DELETE' && pathname.startsWith('/api/users/')) {
+    const session = await requireSession(req, res, { permission: { area: 'users', type: 'change' } });
+    if (!session) return true;
+    const userId = pathname.split('/').pop();
+    try {
+      const saved = await database.update(current => {
+        const data = ensureAdminPresence(normalizeData(current));
+        const target = (data.users || []).find(u => u.id === userId);
+        if (!target) throw new Error('Пользователь не найден');
+        if (target.name === ADMIN_LOGIN_NAME) throw new Error('Нельзя удалить администратора');
+        data.users = (data.users || []).filter(u => u.id !== userId);
+        return data;
+      });
+      sendJson(res, 200, { status: 'ok', users: saved.users || [] });
+    } catch (err) {
+      sendJson(res, 400, { error: err.message || 'Ошибка удаления пользователя' });
+    }
+    return true;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/access-levels') {
+    const session = await requireSession(req, res, { permission: { area: 'accessLevels', type: 'view' } });
+    if (!session) return true;
+    sendJson(res, 200, { levels: session.data.accessLevels || [] });
+    return true;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/access-levels') {
+    const session = await requireSession(req, res, { permission: { area: 'accessLevels', type: 'change' } });
+    if (!session) return true;
+    try {
+      const raw = await parseBody(req);
+      const payload = JSON.parse(raw || '{}');
+      const name = (payload.name || '').trim();
+      if (!name) throw new Error('Уровень доступа должен иметь название');
+      const saved = await database.update(current => {
+        const data = ensureAdminPresence(normalizeData(current));
+        data.accessLevels = data.accessLevels || [];
+        data.accessLevels.push({
+          id: genId('al'),
+          name,
+          description: payload.description || '',
+          permissions: normalizePermissions(payload.permissions || {}),
+          landingTab: payload.landingTab || 'dashboard',
+          idleTimeoutMinutes: payload.idleTimeoutMinutes || 30,
+          isWorker: Boolean(payload.isWorker)
+        });
+        return data;
+      });
+      sendJson(res, 200, { status: 'ok', levels: saved.accessLevels || [] });
+    } catch (err) {
+      sendJson(res, 400, { error: err.message || 'Ошибка сохранения уровня доступа' });
+    }
+    return true;
+  }
+
+  if (req.method === 'PUT' && pathname.startsWith('/api/access-levels/')) {
+    const session = await requireSession(req, res, { permission: { area: 'accessLevels', type: 'change' } });
+    if (!session) return true;
+    const levelId = pathname.split('/').pop();
+    try {
+      const raw = await parseBody(req);
+      const payload = JSON.parse(raw || '{}');
+      const saved = await database.update(current => {
+        const data = ensureAdminPresence(normalizeData(current));
+        const level = (data.accessLevels || []).find(l => l.id === levelId);
+        if (!level) throw new Error('Уровень доступа не найден');
+        level.name = payload.name ? String(payload.name).trim() : level.name;
+        level.description = payload.description != null ? String(payload.description) : (level.description || '');
+        level.permissions = normalizePermissions(payload.permissions || level.permissions || {});
+        level.landingTab = payload.landingTab || level.landingTab || 'dashboard';
+        level.idleTimeoutMinutes = payload.idleTimeoutMinutes || level.idleTimeoutMinutes || 30;
+        level.isWorker = payload.isWorker != null ? Boolean(payload.isWorker) : Boolean(level.isWorker);
+        return data;
+      });
+      sendJson(res, 200, { status: 'ok', levels: saved.accessLevels || [] });
+    } catch (err) {
+      sendJson(res, 400, { error: err.message || 'Ошибка обновления уровня доступа' });
+    }
+    return true;
+  }
+
+  if (req.method === 'DELETE' && pathname.startsWith('/api/access-levels/')) {
+    const session = await requireSession(req, res, { permission: { area: 'accessLevels', type: 'change' } });
+    if (!session) return true;
+    const levelId = pathname.split('/').pop();
+    try {
+      const saved = await database.update(current => {
+        const data = ensureAdminPresence(normalizeData(current));
+        const inUse = (data.users || []).some(u => u.accessLevelId === levelId);
+        if (inUse) throw new Error('Нельзя удалить уровень, который используется пользователями');
+        data.accessLevels = (data.accessLevels || []).filter(l => l.id !== levelId);
+        return data;
+      });
+      sendJson(res, 200, { status: 'ok', levels: saved.accessLevels || [] });
+    } catch (err) {
+      sendJson(res, 400, { error: err.message || 'Ошибка удаления уровня доступа' });
+    }
+    return true;
+  }
+
+  if (req.method === 'GET' && pathname.startsWith('/api/data')) {
+    const session = await requireSession(req, res, { permission: { area: 'dashboard', type: 'view' } });
+    if (!session) return true;
+    const safe = { ...session.data, users: (session.data.users || []).map(sanitizeUser) };
+    sendJson(res, 200, safe);
+    return true;
+  }
+
+  if (req.method === 'POST' && pathname.startsWith('/api/data')) {
+    const session = await requireSession(req, res, { permission: { area: 'cards', type: 'change' } });
+    if (!session) return true;
+    try {
+      const raw = await parseBody(req);
+      const parsedBody = JSON.parse(raw || '{}');
+      const saved = await database.update(current => {
+        const normalized = normalizeData(parsedBody);
+        const merged = mergeSnapshots(current, normalized);
+        return ensureAdminPresence(merged);
+      });
+      const safe = { ...saved, users: (saved.users || []).map(sanitizeUser) };
+      sendJson(res, 200, { status: 'ok', data: safe });
     } catch (err) {
       const status = err.message === 'Payload too large' ? 413 : 400;
       sendJson(res, status, { error: err.message || 'Invalid JSON' });
@@ -400,6 +795,8 @@ function findAttachment(data, attachmentId) {
 
 async function handleFileRoutes(req, res) {
   const parsed = url.parse(req.url, true);
+  const session = await requireSession(req, res, { permission: { area: 'cards', type: req.method === 'GET' ? 'view' : 'change' } });
+  if (!session) return true;
   if (req.method === 'GET' && parsed.pathname.startsWith('/files/')) {
     const attachmentId = parsed.pathname.replace('/files/', '');
     const data = await database.getData();
@@ -440,6 +837,10 @@ async function handleFileRoutes(req, res) {
 
   if (req.method === 'POST' && parsed.pathname.startsWith('/api/cards/') && parsed.pathname.endsWith('/files')) {
     const cardId = parsed.pathname.split('/')[3];
+    if (!hasPermission(session.level, { area: 'attachments', type: 'upload' })) {
+      sendJson(res, 403, { error: 'Нет прав на загрузку файлов' });
+      return true;
+    }
     try {
       const raw = await parseBody(req);
       const payload = JSON.parse(raw || '{}');
@@ -498,6 +899,7 @@ async function requestHandler(req, res) {
 
 async function startServer() {
   await database.init(buildDefaultData);
+  await database.update(current => ensureAdminPresence(normalizeData(current)));
   const server = http.createServer((req, res) => {
     requestHandler(req, res).catch(err => {
       // eslint-disable-next-line no-console

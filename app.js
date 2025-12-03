@@ -31,6 +31,12 @@ let dashboardEligibleCache = [];
 let workspaceSearchTerm = '';
 let workspaceStopContext = null;
 let workspaceActiveModalInput = null;
+let sessionToken = null;
+let currentUser = null;
+let currentAccessLevel = null;
+let usersDirectory = [];
+let accessLevelsDirectory = [];
+let idleTimerId = null;
 
 function setConnectionStatus(message, variant = 'info') {
   const banner = document.getElementById('server-status');
@@ -57,6 +63,25 @@ function startRealtimeClock() {
   update();
   if (clockIntervalId) clearInterval(clockIntervalId);
   clockIntervalId = setInterval(update, 1000);
+}
+
+function hasAccess(area, type = 'view') {
+  if (!currentAccessLevel || !currentAccessLevel.permissions) return false;
+  const perms = currentAccessLevel.permissions[area] || {};
+  return Boolean(perms[type]);
+}
+
+function apiFetch(url, options = {}) {
+  const headers = Object.assign({}, options.headers || {}, sessionToken ? { 'x-session-token': sessionToken } : {});
+  return fetch(url, { ...options, headers });
+}
+
+function resetIdleTimer() {
+  if (idleTimerId) clearTimeout(idleTimerId);
+  const minutes = currentAccessLevel && currentAccessLevel.idleTimeoutMinutes ? currentAccessLevel.idleTimeoutMinutes : 30;
+  idleTimerId = setTimeout(() => {
+    logout();
+  }, minutes * 60 * 1000);
 }
 
 // === УТИЛИТЫ ===
@@ -908,10 +933,10 @@ async function saveData() {
       return;
     }
 
-    const res = await fetch(API_ENDPOINT, {
+    const res = await apiFetch(API_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cards, ops, centers })
+      body: JSON.stringify({ cards, ops, centers, users: usersDirectory, accessLevels: accessLevelsDirectory })
     });
     if (!res.ok) {
       throw new Error('Ответ сервера ' + res.status);
@@ -975,12 +1000,14 @@ function ensureDefaults() {
 
 async function loadData() {
   try {
-    const res = await fetch(API_ENDPOINT);
+    const res = await apiFetch(API_ENDPOINT);
     if (!res.ok) throw new Error('Ответ сервера ' + res.status);
     const payload = await res.json();
     cards = Array.isArray(payload.cards) ? payload.cards : [];
     ops = Array.isArray(payload.ops) ? payload.ops : [];
     centers = Array.isArray(payload.centers) ? payload.centers : [];
+    usersDirectory = Array.isArray(payload.users) ? payload.users : [];
+    accessLevelsDirectory = Array.isArray(payload.accessLevels) ? payload.accessLevels : [];
     apiOnline = true;
     setConnectionStatus('', 'info');
   } catch (err) {
@@ -990,6 +1017,8 @@ async function loadData() {
     cards = [];
     ops = [];
     centers = [];
+    usersDirectory = [];
+    accessLevelsDirectory = [];
   }
 
   ensureDefaults();
@@ -2010,7 +2039,13 @@ function openGroupExecutorModal(groupId) {
   const group = cards.find(c => c.id === groupId && isGroupCard(c));
   if (!modal || !group) return;
   groupExecutorContext = { groupId };
-  if (executorInput) executorInput.value = '';
+  if (executorInput) {
+    executorInput.innerHTML = '<option value=""></option>' + usersDirectory
+      .filter(u => u.active !== false)
+      .map(u => '<option value="' + escapeHtml(u.name || '') + '">' + escapeHtml(u.name || '') + '</option>')
+      .join('');
+    executorInput.value = '';
+  }
   if (opCodeInput) opCodeInput.value = '';
   modal.classList.remove('hidden');
   if (executorInput) executorInput.focus();
@@ -2971,6 +3006,15 @@ function withWorkorderScrollLock(cb, { anchorCardId = null, anchorGroupId = null
   });
 }
 
+function renderExecutorSelect(value, { className = '', attrs = '' } = {}) {
+  const options = usersDirectory.map(user => {
+    const name = user.name || '';
+    const selected = name === value ? ' selected' : '';
+    return '<option value="' + escapeHtml(name) + '"' + selected + '>' + escapeHtml(name) + '</option>';
+  }).join('');
+  return '<select class="' + className + '" ' + attrs + '><option value=""></option>' + options + '</select>';
+}
+
 function renderExecutorCell(op, card, { readonly = false } = {}) {
   const extras = Array.isArray(op.additionalExecutors) ? op.additionalExecutors : [];
   if (readonly) {
@@ -2986,14 +3030,14 @@ function renderExecutorCell(op, card, { readonly = false } = {}) {
   const cardId = card ? card.id : '';
   let html = '<div class="executor-cell" data-card-id="' + cardId + '" data-op-id="' + op.id + '">';
   html += '<div class="executor-row primary">' +
-    '<input type="text" class="executor-main-input" data-card-id="' + cardId + '" data-op-id="' + op.id + '" value="' + escapeHtml(op.executor || '') + '" placeholder="Исполнитель" />' +
+    renderExecutorSelect(op.executor || '', { className: 'executor-main-input', attrs: 'data-card-id="' + cardId + '" data-op-id="' + op.id + '"' }) +
     (extras.length < 2 ? '<button type="button" class="icon-btn add-executor-btn" data-card-id="' + cardId + '" data-op-id="' + op.id + '">+</button>' : '') +
     '</div>';
 
   extras.forEach((name, idx) => {
     const canAddMore = extras.length < 2 && idx === extras.length - 1;
     html += '<div class="executor-row extra" data-extra-index="' + idx + '">' +
-      '<input type="text" class="additional-executor-input" data-card-id="' + cardId + '" data-op-id="' + op.id + '" data-extra-index="' + idx + '" value="' + escapeHtml(name || '') + '" placeholder="Доп. исполнитель" />' +
+      renderExecutorSelect(name || '', { className: 'additional-executor-input', attrs: 'data-card-id="' + cardId + '" data-op-id="' + op.id + '" data-extra-index="' + idx + '"' }) +
       (canAddMore ? '<button type="button" class="icon-btn add-executor-btn" data-card-id="' + cardId + '" data-op-id="' + op.id + '">+</button>' : '') +
       '<button type="button" class="icon-btn remove-executor-btn" data-card-id="' + cardId + '" data-op-id="' + op.id + '" data-extra-index="' + idx + '">-</button>' +
       '</div>';
@@ -4629,10 +4673,458 @@ function setupWorkspaceModal() {
   });
 }
 
+function updateUserBadge() {
+  const label = document.getElementById('current-user-label');
+  const btn = document.getElementById('logout-btn');
+  if (currentUser) {
+    label.textContent = currentUser.name || 'Пользователь';
+    if (btn) btn.disabled = false;
+  } else {
+    label.textContent = 'Не авторизован';
+    if (btn) btn.disabled = true;
+  }
+}
+
+function refreshUserOptionsList() {
+  const list = document.getElementById('user-options');
+  if (!list) return;
+  list.innerHTML = '';
+  (usersDirectory || [])
+    .filter(u => u.active !== false)
+    .forEach(user => {
+      const opt = document.createElement('option');
+      opt.value = user.name || '';
+      list.appendChild(opt);
+    });
+}
+
+function applyAccessVisibility() {
+  const map = [
+    { id: 'dashboard', area: 'dashboard' },
+    { id: 'cards', area: 'cards' },
+    { id: 'workorders', area: 'workorders' },
+    { id: 'archive', area: 'archive' },
+    { id: 'workspace', area: 'workspace' },
+    { id: 'users', area: 'users' },
+    { id: 'access-levels', area: 'accessLevels' }
+  ];
+  map.forEach(entry => {
+    const allowed = hasAccess(entry.area, 'view');
+    const btn = document.querySelector('.nav-btn[data-target="' + entry.id + '"]');
+    const section = document.getElementById(entry.id);
+    if (btn) btn.classList.toggle('hidden', !allowed);
+    if (section) section.classList.toggle('hidden', !allowed);
+  });
+}
+
+function populateAccessLevelSelect(selectEl) {
+  if (!selectEl) return;
+  selectEl.innerHTML = '';
+  accessLevelsDirectory.forEach(level => {
+    const opt = document.createElement('option');
+    opt.value = level.id;
+    opt.textContent = level.name || level.id;
+    selectEl.appendChild(opt);
+  });
+}
+
+function renderUsersTable() {
+  const container = document.getElementById('users-table');
+  if (!container) return;
+  if (!usersDirectory.length) {
+    container.innerHTML = '<p class="muted">Пользователи отсутствуют.</p>';
+    return;
+  }
+  let html = '<table class="simple-table"><thead><tr><th>Имя</th><th>Уровень</th><th>Статус</th></tr></thead><tbody>';
+  usersDirectory.forEach(user => {
+    const level = accessLevelsDirectory.find(l => l.id === user.accessLevelId);
+    html += '<tr class="user-row" data-user-id="' + user.id + '">' +
+      '<td>' + escapeHtml(user.name || '') + '</td>' +
+      '<td>' + escapeHtml(level ? level.name : '') + '</td>' +
+      '<td>' + (user.active === false ? 'Отключен' : 'Активен') + '</td>' +
+      '</tr>';
+  });
+  html += '</tbody></table>';
+  container.innerHTML = html;
+  container.querySelectorAll('.user-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const id = row.getAttribute('data-user-id');
+      const user = usersDirectory.find(u => u.id === id);
+      fillUserForm(user);
+    });
+  });
+}
+
+function fillUserForm(user) {
+  const idInput = document.getElementById('user-id');
+  const nameInput = document.getElementById('user-name');
+  const passInput = document.getElementById('user-password');
+  const levelSelect = document.getElementById('user-access-level');
+  const activeInput = document.getElementById('user-active');
+  const deleteBtn = document.getElementById('delete-user');
+  const printBtn = document.getElementById('print-barcode');
+  if (!user) {
+    if (idInput) idInput.value = '';
+    if (nameInput) nameInput.value = '';
+    if (passInput) passInput.value = '';
+    if (levelSelect) levelSelect.value = accessLevelsDirectory[0] ? accessLevelsDirectory[0].id : '';
+    if (activeInput) activeInput.checked = true;
+    if (deleteBtn) deleteBtn.disabled = true;
+    if (printBtn) printBtn.disabled = true;
+    return;
+  }
+  if (idInput) idInput.value = user.id;
+  if (nameInput) nameInput.value = user.name || '';
+  if (passInput) passInput.value = user.password || '';
+  if (levelSelect) levelSelect.value = user.accessLevelId || '';
+  if (activeInput) activeInput.checked = user.active !== false;
+  if (deleteBtn) deleteBtn.disabled = user.name === 'Abyss';
+  if (printBtn) printBtn.disabled = false;
+}
+
+function renderAccessLevelsTable() {
+  const container = document.getElementById('access-levels-table');
+  if (!container) return;
+  if (!accessLevelsDirectory.length) {
+    container.innerHTML = '<p class="muted">Уровни доступа отсутствуют.</p>';
+    return;
+  }
+  let html = '<table class="simple-table"><thead><tr><th>Название</th><th>Описание</th><th>Автовыход</th><th>Рабочий</th></tr></thead><tbody>';
+  accessLevelsDirectory.forEach(level => {
+    html += '<tr class="level-row" data-level-id="' + level.id + '">' +
+      '<td>' + escapeHtml(level.name || '') + '</td>' +
+      '<td>' + escapeHtml(level.description || '') + '</td>' +
+      '<td>' + escapeHtml(level.idleTimeoutMinutes || 0) + ' мин</td>' +
+      '<td>' + (level.isWorker ? 'Да' : 'Нет') + '</td>' +
+      '</tr>';
+  });
+  html += '</tbody></table>';
+  container.innerHTML = html;
+  container.querySelectorAll('.level-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const id = row.getAttribute('data-level-id');
+      const level = accessLevelsDirectory.find(l => l.id === id);
+      fillAccessLevelForm(level);
+    });
+  });
+}
+
+function fillAccessLevelForm(level) {
+  const idInput = document.getElementById('level-id');
+  const nameInput = document.getElementById('level-name');
+  const descInput = document.getElementById('level-desc');
+  const landingSelect = document.getElementById('level-landing');
+  const timeoutInput = document.getElementById('level-timeout');
+  const workerInput = document.getElementById('level-worker');
+  const deleteBtn = document.getElementById('level-delete');
+  if (!level) {
+    if (idInput) idInput.value = '';
+    if (nameInput) nameInput.value = '';
+    if (descInput) descInput.value = '';
+    if (landingSelect) landingSelect.value = 'dashboard';
+    if (timeoutInput) timeoutInput.value = 30;
+    if (workerInput) workerInput.checked = false;
+    if (deleteBtn) deleteBtn.disabled = true;
+    document.querySelectorAll('.perm-toggle').forEach(chk => { chk.checked = false; });
+    return;
+  }
+  if (idInput) idInput.value = level.id;
+  if (nameInput) nameInput.value = level.name || '';
+  if (descInput) descInput.value = level.description || '';
+  if (landingSelect) landingSelect.value = level.landingTab || 'dashboard';
+  if (timeoutInput) timeoutInput.value = level.idleTimeoutMinutes || 30;
+  if (workerInput) workerInput.checked = Boolean(level.isWorker);
+  if (deleteBtn) deleteBtn.disabled = false;
+  const permissions = level.permissions || {};
+  document.querySelectorAll('.perm-toggle').forEach(chk => {
+    const area = chk.getAttribute('data-perm-area');
+    const type = chk.getAttribute('data-perm-type');
+    chk.checked = Boolean(permissions[area] && permissions[area][type]);
+  });
+}
+
+function collectPermissionsFromForm() {
+  const perms = {};
+  document.querySelectorAll('.perm-toggle').forEach(chk => {
+    const area = chk.getAttribute('data-perm-area');
+    const type = chk.getAttribute('data-perm-type');
+    perms[area] = perms[area] || {};
+    perms[area][type] = chk.checked;
+  });
+  return perms;
+}
+
+function setupPermissionGrid() {
+  const container = document.getElementById('permissions-grid');
+  if (!container) return;
+  const entries = [
+    { key: 'dashboard', title: 'Дашборд' },
+    { key: 'cards', title: 'Тех. карты' },
+    { key: 'workorders', title: 'Трекер' },
+    { key: 'archive', title: 'Архив' },
+    { key: 'workspace', title: 'Рабочее место' },
+    { key: 'attachments', title: 'Вложения', custom: ['upload', 'remove'] },
+    { key: 'users', title: 'Пользователи' },
+    { key: 'accessLevels', title: 'Уровни доступа' }
+  ];
+  container.innerHTML = entries.map(entry => {
+    const hasCustom = Array.isArray(entry.custom);
+    const checks = hasCustom
+      ? entry.custom.map(type => '<label class="toggle-row"><input type="checkbox" class="perm-toggle" data-perm-area="' + entry.key + '" data-perm-type="' + type + '"><span>' + (type === 'upload' ? 'Загрузка' : 'Удаление') + '</span></label>').join('')
+      : ['view', 'change'].map(type => '<label class="toggle-row"><input type="checkbox" class="perm-toggle" data-perm-area="' + entry.key + '" data-perm-type="' + type + '"><span>' + (type === 'view' ? 'Просмотр' : 'Изменение') + '</span></label>').join('');
+    return '<div class="perm-card"><h4>' + escapeHtml(entry.title) + '</h4>' + checks + '</div>';
+  }).join('');
+}
+
+async function refreshUsersDirectory() {
+  try {
+    const res = await apiFetch('/api/users');
+    if (!res.ok) throw new Error('Ошибка загрузки пользователей');
+    const payload = await res.json();
+    usersDirectory = Array.isArray(payload.users) ? payload.users : [];
+    refreshUserOptionsList();
+    renderUsersTable();
+    populateAccessLevelSelect(document.getElementById('user-access-level'));
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function refreshAccessLevelsDirectory() {
+  try {
+    const res = await apiFetch('/api/access-levels');
+    if (!res.ok) throw new Error('Ошибка загрузки уровней');
+    const payload = await res.json();
+    accessLevelsDirectory = Array.isArray(payload.levels) ? payload.levels : [];
+    populateAccessLevelSelect(document.getElementById('user-access-level'));
+    renderAccessLevelsTable();
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function saveUserFromForm(evt) {
+  evt.preventDefault();
+  const id = document.getElementById('user-id').value;
+  const name = document.getElementById('user-name').value.trim();
+  const password = document.getElementById('user-password').value.trim();
+  const accessLevelId = document.getElementById('user-access-level').value;
+  const active = document.getElementById('user-active').checked;
+  if (!name || password.length < 6) return;
+  const payload = { name, password, accessLevelId, active };
+  const method = id ? 'PUT' : 'POST';
+  const url = id ? '/api/users/' + id : '/api/users';
+  const res = await apiFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const data = await res.json();
+  if (!res.ok) {
+    alert(data.error || 'Ошибка сохранения пользователя');
+    return;
+  }
+  usersDirectory = data.users || usersDirectory;
+  refreshUserOptionsList();
+  renderUsersTable();
+  fillUserForm(null);
+}
+
+async function deleteUser() {
+  const id = document.getElementById('user-id').value;
+  if (!id) return;
+  const res = await apiFetch('/api/users/' + id, { method: 'DELETE' });
+  const data = await res.json();
+  if (!res.ok) {
+    alert(data.error || 'Не удалось удалить пользователя');
+    return;
+  }
+  usersDirectory = data.users || usersDirectory;
+  refreshUserOptionsList();
+  renderUsersTable();
+  fillUserForm(null);
+}
+
+async function saveAccessLevel(evt) {
+  evt.preventDefault();
+  const id = document.getElementById('level-id').value;
+  const name = document.getElementById('level-name').value.trim();
+  const description = document.getElementById('level-desc').value.trim();
+  const landingTab = document.getElementById('level-landing').value;
+  const idleTimeoutMinutes = parseInt(document.getElementById('level-timeout').value, 10) || 30;
+  const isWorker = document.getElementById('level-worker').checked;
+  const permissions = collectPermissionsFromForm();
+  const payload = { name, description, landingTab, idleTimeoutMinutes, isWorker, permissions };
+  const method = id ? 'PUT' : 'POST';
+  const url = id ? '/api/access-levels/' + id : '/api/access-levels';
+  const res = await apiFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const data = await res.json();
+  if (!res.ok) {
+    alert(data.error || 'Ошибка сохранения уровня доступа');
+    return;
+  }
+  accessLevelsDirectory = data.levels || accessLevelsDirectory;
+  populateAccessLevelSelect(document.getElementById('user-access-level'));
+  renderAccessLevelsTable();
+  fillAccessLevelForm(null);
+}
+
+async function deleteAccessLevel() {
+  const id = document.getElementById('level-id').value;
+  if (!id) return;
+  const res = await apiFetch('/api/access-levels/' + id, { method: 'DELETE' });
+  const data = await res.json();
+  if (!res.ok) {
+    alert(data.error || 'Ошибка удаления уровня доступа');
+    return;
+  }
+  accessLevelsDirectory = data.levels || accessLevelsDirectory;
+  populateAccessLevelSelect(document.getElementById('user-access-level'));
+  renderAccessLevelsTable();
+  fillAccessLevelForm(null);
+}
+
+function generatePassword() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz0123456789';
+  let pwd = '';
+  while (pwd.length < 8) {
+    pwd += chars[Math.floor(Math.random() * chars.length)];
+  }
+  const input = document.getElementById('user-password');
+  if (input) input.value = pwd;
+}
+
+function printBarcodeForCurrentUser() {
+  const name = document.getElementById('user-name').value || '';
+  const password = document.getElementById('user-password').value || '';
+  if (!password) return;
+  const win = window.open('', '_blank', 'width=400,height=220');
+  if (!win) return;
+  win.document.write('<html><head><title>Штрихкод</title></head><body style="text-align:center; font-family:sans-serif;">');
+  win.document.write('<svg id="barcode"></svg>');
+  win.document.write('<div style="margin-top:8px; font-size:16px;">' + escapeHtml(name) + '</div>');
+  win.document.write('</body></html>');
+  if (win.JsBarcode) {
+    win.JsBarcode('#barcode', password, { format: 'CODE128', displayValue: true, fontSize: 16 });
+  } else if (window.JsBarcode) {
+    window.JsBarcode(win.document.querySelector('#barcode'), password, { format: 'CODE128', displayValue: true, fontSize: 16 });
+  }
+  win.print();
+}
+
+function setupUserManagement() {
+  const form = document.getElementById('user-form');
+  const resetBtn = document.getElementById('user-form-reset');
+  const deleteBtn = document.getElementById('delete-user');
+  const genBtn = document.getElementById('generate-password');
+  const printBtn = document.getElementById('print-barcode');
+  if (form) form.addEventListener('submit', saveUserFromForm);
+  if (resetBtn) resetBtn.addEventListener('click', () => fillUserForm(null));
+  if (deleteBtn) deleteBtn.addEventListener('click', deleteUser);
+  if (genBtn) genBtn.addEventListener('click', generatePassword);
+  if (printBtn) printBtn.addEventListener('click', printBarcodeForCurrentUser);
+  populateAccessLevelSelect(document.getElementById('user-access-level'));
+  renderUsersTable();
+}
+
+function setupAccessLevelManagement() {
+  setupPermissionGrid();
+  const form = document.getElementById('access-level-form');
+  const resetBtn = document.getElementById('level-reset');
+  const deleteBtn = document.getElementById('level-delete');
+  if (form) form.addEventListener('submit', saveAccessLevel);
+  if (resetBtn) resetBtn.addEventListener('click', () => fillAccessLevelForm(null));
+  if (deleteBtn) deleteBtn.addEventListener('click', deleteAccessLevel);
+}
+
+function showAuthModal(message = '') {
+  const modal = document.getElementById('auth-modal');
+  const main = document.querySelector('main');
+  const error = document.getElementById('auth-error');
+  if (error) error.textContent = message || '';
+  if (modal) modal.classList.remove('hidden');
+  if (main) main.classList.add('hidden');
+  const input = document.getElementById('auth-password');
+  if (input) input.focus();
+}
+
+function hideAuthModal() {
+  const modal = document.getElementById('auth-modal');
+  const main = document.querySelector('main');
+  if (modal) modal.classList.add('hidden');
+  if (main) main.classList.remove('hidden');
+}
+
+async function logout() {
+  try {
+    await apiFetch('/api/logout', { method: 'POST' });
+  } catch (e) {
+    // ignore
+  }
+  sessionToken = null;
+  currentUser = null;
+  currentAccessLevel = null;
+  usersDirectory = [];
+  accessLevelsDirectory = [];
+  updateUserBadge();
+  showAuthModal();
+}
+
+async function performLogin(password) {
+  try {
+    const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) });
+    const data = await res.json();
+    if (!res.ok) {
+      showAuthModal(data.error || 'Ошибка входа');
+      return;
+    }
+    sessionToken = data.token;
+    currentUser = data.user;
+    currentAccessLevel = data.accessLevel;
+    updateUserBadge();
+    hideAuthModal();
+    applyAccessVisibility();
+    resetIdleTimer();
+    ['click', 'keydown', 'mousemove', 'touchstart'].forEach(evt => {
+      document.addEventListener(evt, resetIdleTimer, { passive: true });
+    });
+    await loadData();
+    refreshUserOptionsList();
+    renderEverything();
+    if (window.dashboardPager && typeof window.dashboardPager.updatePages === 'function') {
+      requestAnimationFrame(() => window.dashboardPager.updatePages());
+    }
+    if (!window.__appTimersStarted) {
+      setInterval(tickTimers, 1000);
+      window.__appTimersStarted = true;
+    }
+    await refreshAccessLevelsDirectory();
+    await refreshUsersDirectory();
+    setupUserManagement();
+    setupAccessLevelManagement();
+    const targetTab = currentUser && currentUser.name === 'Abyss' ? 'dashboard' : (currentAccessLevel && currentAccessLevel.landingTab) || 'dashboard';
+    const btn = document.querySelector('.nav-btn[data-target="' + targetTab + '"]');
+    if (btn && !btn.classList.contains('hidden')) {
+      btn.click();
+    }
+  } catch (err) {
+    showAuthModal('Ошибка соединения');
+  }
+}
+
+function setupAuthFlow() {
+  const form = document.getElementById('auth-form');
+  if (form) {
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const pwd = document.getElementById('auth-password').value;
+      performLogin(pwd.trim());
+    });
+  }
+  const logoutBtn = document.getElementById('logout-btn');
+  if (logoutBtn) logoutBtn.addEventListener('click', () => logout());
+  showAuthModal();
+}
+
 // === ИНИЦИАЛИЗАЦИЯ ===
   document.addEventListener('DOMContentLoaded', async () => {
     startRealtimeClock();
-    await loadData();
     setupNavigation();
     setupCardsTabs();
     setupForms();
@@ -4642,9 +5134,5 @@ function setupWorkspaceModal() {
     setupAttachmentControls();
     setupWorkspaceModal();
     setupLogModal();
-    renderEverything();
-    if (window.dashboardPager && typeof window.dashboardPager.updatePages === 'function') {
-      requestAnimationFrame(() => window.dashboardPager.updatePages());
-    }
-    setInterval(tickTimers, 1000);
+    setupAuthFlow();
   });
