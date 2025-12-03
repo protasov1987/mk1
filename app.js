@@ -213,44 +213,16 @@ function calculateFinalResults(operations = [], initialQty = 0) {
     ? operations.filter(Boolean).slice().sort((a, b) => (a.order || 0) - (b.order || 0))
     : [];
 
-  let remaining = total;
-  let delayed = 0;
-  let scrapTotal = 0;
-  let goodTracked = 0;
-
-  opsSorted.forEach(op => {
-    const good = toSafeCount(op && op.goodCount != null ? op.goodCount : 0);
-    const scrap = toSafeCount(op && op.scrapCount != null ? op.scrapCount : 0);
-    const delay = toSafeCount(op && op.holdCount != null ? op.holdCount : 0);
-
-    const scrapFromDelayed = Math.min(delayed, scrap);
-    delayed -= scrapFromDelayed;
-    scrapTotal += scrapFromDelayed;
-
-    const scrapFromRemaining = Math.min(scrap - scrapFromDelayed, remaining);
-    scrapTotal += scrapFromRemaining;
-    remaining -= scrapFromRemaining;
-
-    const goodFromDelayed = Math.min(delayed, good);
-    delayed -= goodFromDelayed;
-
-    const goodFromRemaining = Math.min(good - goodFromDelayed, remaining);
-    remaining -= goodFromRemaining;
-    goodTracked += goodFromDelayed + goodFromRemaining;
-
-    const newDelayed = Math.min(delay, remaining);
-    delayed += newDelayed;
-    remaining -= newDelayed;
-  });
-
-  const delayedFinal = delayed;
-  const goodFinal = Math.max(0, total - scrapTotal - delayedFinal);
+  const lastOp = opsSorted[opsSorted.length - 1];
+  const goodFinal = toSafeCount(lastOp && lastOp.goodCount != null ? lastOp.goodCount : 0);
+  const scrapFinal = toSafeCount(lastOp && lastOp.scrapCount != null ? lastOp.scrapCount : 0);
+  const delayedFinal = toSafeCount(lastOp && lastOp.holdCount != null ? lastOp.holdCount : 0);
 
   return {
     good_final: goodFinal,
-    scrap_final: scrapTotal,
+    scrap_final: scrapFinal,
     delayed_final: delayedFinal,
-    summary_ok: goodFinal + scrapTotal + delayedFinal === total && goodFinal >= goodTracked
+    summary_ok: total === 0 || goodFinal + scrapFinal + delayedFinal === total
   };
 }
 
