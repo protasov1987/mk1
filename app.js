@@ -28,6 +28,9 @@ const cardsGroupOpen = new Set();
 let groupExecutorContext = null;
 let dashboardStatusSnapshot = null;
 let dashboardEligibleCache = [];
+let workspaceSearchTerm = '';
+let workspaceStopContext = null;
+let workspaceActiveModalInput = null;
 
 function setConnectionStatus(message, variant = 'info') {
   const banner = document.getElementById('server-status');
@@ -2845,6 +2848,63 @@ function buildWorkorderCardDetails(card, { opened = false, allowArchive = true, 
   return html;
 }
 
+function buildWorkspaceCardDetails(card, { opened = true } = {}) {
+  const stateBadge = renderCardStateBadge(card);
+  const filesCount = (card.attachments || []).length;
+  const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
+  const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-card-id="' + card.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
+  const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
+  const nameLabel = formatCardNameWithGroupPosition(card);
+
+  let html = '<details class="wo-card workspace-card" data-card-id="' + card.id + '"' + (opened ? ' open' : '') + '>' +
+    '<summary>' +
+    '<div class="summary-line">' +
+    '<div class="summary-text">' +
+    '<strong>' + nameLabel + '</strong>' +
+    ' <span class="summary-sub">' +
+    (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') + contractText +
+    barcodeButton + filesButton +
+    '</span>' +
+    '</div>' +
+    '<div class="summary-actions">' + stateBadge + '</div>' +
+    '</div>' +
+    '</summary>';
+
+  html += buildCardInfoBlock(card);
+  html += buildOperationsTable(card, { readonly: false, showQuantityColumn: false, lockExecutors: true, lockQuantities: true });
+  html += '</details>';
+  return html;
+}
+
+function buildWorkspaceGroupDetails(group) {
+  const children = getGroupChildren(group).filter(c => !c.archived);
+  const stateBadge = renderCardStateBadge(group);
+  const contractText = group.contractNumber ? ' (Договор: ' + escapeHtml(group.contractNumber) + ')' : '';
+  const filesCount = (group.attachments || []).length;
+  const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + group.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
+  const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-card-id="' + group.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
+
+  const childrenHtml = children.length
+    ? children.map(child => buildWorkspaceCardDetails(child, { opened: true })).join('')
+    : '<p class="group-empty">В группе нет карт для отображения.</p>';
+
+  return '<details class="wo-card group-wo-card" data-group-id="' + group.id + '" open>' +
+    '<summary>' +
+    '<div class="summary-line">' +
+    '<div class="summary-text">' +
+    '<strong><span class="group-marker">(Г)</span>' + escapeHtml(group.name || group.id) + '</strong>' +
+    ' <span class="summary-sub">' +
+    (group.orderNo ? ' (Заказ: ' + escapeHtml(group.orderNo) + ')' : '') + contractText +
+    barcodeButton + filesButton +
+    '</span>' +
+    '</div>' +
+    '<div class="summary-actions">' + stateBadge + '</div>' +
+    '</div>' +
+    '</summary>' +
+    '<div class="group-children">' + childrenHtml + '</div>' +
+    '</details>';
+}
+
 function scrollWorkorderDetailsIntoViewIfNeeded(detailsEl) {
   if (!detailsEl || !workorderAutoScrollEnabled || suppressWorkorderAutoscroll) return;
 
@@ -2943,15 +3003,16 @@ function renderExecutorCell(op, card, { readonly = false } = {}) {
   return html;
 }
 
-function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = false, showQuantityColumn = true } = {}) {
+function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = false, showQuantityColumn = true, lockExecutors = false, lockQuantities = false, allowActions = !readonly } = {}) {
   const opsSorted = [...(card.operations || [])].sort((a, b) => (a.order || 0) - (b.order || 0));
-  const baseColumns = readonly ? 9 : 10;
+  const hasActions = allowActions && !readonly;
+  const baseColumns = hasActions ? 10 : 9;
   const totalColumns = baseColumns + (showQuantityColumn ? 1 : 0);
   let html = '<table><thead><tr>' +
     '<th>Порядок</th><th>Участок</th><th>Код операции</th><th>Операция</th>' +
     (showQuantityColumn ? '<th>Количество изделий</th>' : '') +
     '<th>Исполнитель</th><th>План (мин)</th><th>Статус</th><th>Текущее / факт. время</th>' +
-    (readonly ? '' : '<th>Действия</th>') +
+    (hasActions ? '<th>Действия</th>' : '') +
     '<th>Комментарии</th>' +
     '</tr></thead><tbody>';
 
@@ -2970,7 +3031,7 @@ function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = fa
     }
 
     let actionsHtml = '';
-    if (!readonly) {
+    if (hasActions) {
       if (op.status === 'NOT_STARTED' || !op.status) {
         actionsHtml = '<button class="btn-primary" data-action="start" data-card-id="' + card.id + '" data-op-id="' + op.id + '">Начать</button>';
       } else if (op.status === 'IN_PROGRESS') {
@@ -2991,9 +3052,9 @@ function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = fa
       ? '<div class="comment-readonly">' + escapeHtml(op.comment || '') + '</div>'
       : '<textarea class="comment-input" data-card-id="' + card.id + '" data-op-id="' + op.id + '" maxlength="40" rows="1" placeholder="Комментарий">' + escapeHtml(op.comment || '') + '</textarea>';
 
-    const actionsCell = readonly
-      ? ''
-      : '<td><div class="table-actions">' + actionsHtml + '</div></td>';
+    const actionsCell = hasActions
+      ? '<td><div class="table-actions">' + actionsHtml + '</div></td>'
+      : '';
 
     html += '<tr data-row-id="' + rowId + '">' +
       '<td>' + (idx + 1) + '</td>' +
@@ -3001,7 +3062,7 @@ function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = fa
       '<td>' + escapeHtml(op.opCode || '') + '</td>' +
       '<td>' + renderOpName(op) + '</td>' +
       (showQuantityColumn ? '<td>' + escapeHtml(getOperationQuantity(op, card)) + '</td>' : '') +
-      '<td>' + renderExecutorCell(op, card, { readonly }) + '</td>' +
+      '<td>' + renderExecutorCell(op, card, { readonly: readonly || lockExecutors }) + '</td>' +
       '<td>' + (op.plannedMinutes || '') + '</td>' +
       '<td>' + statusBadge(op.status) + '</td>' +
       '<td>' + timeCell + '</td>' +
@@ -3009,7 +3070,7 @@ function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = fa
       '<td>' + commentCell + '</td>' +
       '</tr>';
 
-    html += renderQuantityRow(card, op, { readonly, colspan: totalColumns, blankForPrint: quantityPrintBlanks });
+    html += renderQuantityRow(card, op, { readonly: readonly || lockQuantities, colspan: totalColumns, blankForPrint: quantityPrintBlanks });
   });
 
   html += '</tbody></table>';
@@ -3121,6 +3182,100 @@ function renderItemListRow(card, op, { readonly = false, colspan = 9, blankForPr
     '<div class="items-row-header">Список изделий</div>' +
     '<div class="items-row-content">' + itemBlocks + '</div>' +
     '</td></tr>';
+}
+
+function applyOperationAction(action, card, op, { anchorGroupId = null, useWorkorderScrollLock = true } = {}) {
+  if (!card || !op) return;
+
+  const execute = () => {
+    const prevStatus = op.status;
+    const prevElapsed = op.elapsedSeconds || 0;
+    const prevCardStatus = card.status;
+
+    if (action === 'start') {
+      const now = Date.now();
+      if (!op.firstStartedAt) op.firstStartedAt = now;
+      op.status = 'IN_PROGRESS';
+      op.startedAt = now;
+      op.lastPausedAt = null;
+      op.finishedAt = null;
+      op.actualSeconds = null;
+      op.elapsedSeconds = 0;
+    } else if (action === 'pause') {
+      if (op.status === 'IN_PROGRESS') {
+        const now = Date.now();
+        const diff = op.startedAt ? (now - op.startedAt) / 1000 : 0;
+        op.elapsedSeconds = (op.elapsedSeconds || 0) + diff;
+        op.lastPausedAt = now;
+        op.startedAt = null;
+        op.status = 'PAUSED';
+      }
+    } else if (action === 'resume') {
+      const now = Date.now();
+      if (op.status === 'DONE' && typeof op.elapsedSeconds !== 'number') {
+        op.elapsedSeconds = op.actualSeconds || 0;
+      }
+      if (!op.firstStartedAt) op.firstStartedAt = now;
+      op.status = 'IN_PROGRESS';
+      op.startedAt = now;
+      op.lastPausedAt = null;
+      op.finishedAt = null;
+    } else if (action === 'stop') {
+      const now = Date.now();
+      if (op.status === 'IN_PROGRESS') {
+        const diff = op.startedAt ? (now - op.startedAt) / 1000 : 0;
+        op.elapsedSeconds = (op.elapsedSeconds || 0) + diff;
+      }
+      const qtyTotal = getOperationQuantity(op, card);
+      if (card.useItemList) {
+        normalizeOperationItems(card, op);
+        const wrongItem = (op.items || []).find(item => {
+          const expected = item.quantity != null ? item.quantity : 1;
+          const total = toSafeCount(item.goodCount || 0) + toSafeCount(item.scrapCount || 0) + toSafeCount(item.holdCount || 0);
+          return expected > 0 && total !== expected;
+        });
+        if (wrongItem) {
+          alert('Количество по изделию "' + (wrongItem.name || 'Изделие') + '" не совпадает');
+          return;
+        }
+      } else if (qtyTotal > 0) {
+        const sum = toSafeCount(op.goodCount || 0) + toSafeCount(op.scrapCount || 0) + toSafeCount(op.holdCount || 0);
+        if (sum !== qtyTotal) {
+          alert('Количество деталей не совпадает');
+          return;
+        }
+      }
+      op.startedAt = null;
+      op.finishedAt = now;
+      op.lastPausedAt = null;
+      op.actualSeconds = op.elapsedSeconds || 0;
+      op.status = 'DONE';
+    }
+
+    recalcCardStatus(card);
+    if (prevStatus !== op.status) {
+      recordCardLog(card, { action: 'Статус операции', object: opLogLabel(op), field: 'status', targetId: op.id, oldValue: prevStatus, newValue: op.status });
+    }
+    if (prevElapsed !== op.elapsedSeconds && op.status === 'DONE') {
+      recordCardLog(card, { action: 'Факт. время', object: opLogLabel(op), field: 'elapsedSeconds', targetId: op.id, oldValue: Math.round(prevElapsed), newValue: Math.round(op.elapsedSeconds || 0) });
+    }
+    if (prevCardStatus !== card.status) {
+      recordCardLog(card, { action: 'Статус карты', object: 'Карта', field: 'status', oldValue: prevCardStatus, newValue: card.status });
+    }
+    saveData();
+    renderEverything();
+  };
+
+  suppressWorkorderAutoscroll = true;
+  try {
+    if (useWorkorderScrollLock) {
+      withWorkorderScrollLock(execute, { anchorCardId: card.id, anchorGroupId });
+    } else {
+      execute();
+    }
+  } finally {
+    suppressWorkorderAutoscroll = false;
+  }
 }
 
 function renderWorkordersTable({ collapseAll = false } = {}) {
@@ -3534,91 +3689,197 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       }
 
       const anchorGroupId = detail ? detail.getAttribute('data-group-id') : null;
-      suppressWorkorderAutoscroll = true;
-      try {
-        const prevStatus = op.status;
-        const prevElapsed = op.elapsedSeconds || 0;
-        const prevCardStatus = card.status;
+      applyOperationAction(action, card, op, { anchorGroupId });
+    });
+  });
+}
 
-        withWorkorderScrollLock(() => {
-          if (action === 'start') {
-            const now = Date.now();
-            if (!op.firstStartedAt) op.firstStartedAt = now;
-            op.status = 'IN_PROGRESS';
-            op.startedAt = now;
-            op.lastPausedAt = null;
-            op.finishedAt = null;
-            op.actualSeconds = null;
-            op.elapsedSeconds = 0;
-          } else if (action === 'pause') {
-            if (op.status === 'IN_PROGRESS') {
-              const now = Date.now();
-              const diff = op.startedAt ? (now - op.startedAt) / 1000 : 0;
-              op.elapsedSeconds = (op.elapsedSeconds || 0) + diff;
-              op.lastPausedAt = now;
-              op.startedAt = null;
-              op.status = 'PAUSED';
-            }
-          } else if (action === 'resume') {
-            const now = Date.now();
-            if (op.status === 'DONE' && typeof op.elapsedSeconds !== 'number') {
-              op.elapsedSeconds = op.actualSeconds || 0;
-            }
-            if (!op.firstStartedAt) op.firstStartedAt = now;
-            op.status = 'IN_PROGRESS';
-            op.startedAt = now;
-            op.lastPausedAt = null;
-            op.finishedAt = null;
-          } else if (action === 'stop') {
-            const now = Date.now();
-            if (op.status === 'IN_PROGRESS') {
-              const diff = op.startedAt ? (now - op.startedAt) / 1000 : 0;
-              op.elapsedSeconds = (op.elapsedSeconds || 0) + diff;
-            }
-            const qtyTotal = getOperationQuantity(op, card);
-            if (card.useItemList) {
-              normalizeOperationItems(card, op);
-              const wrongItem = (op.items || []).find(item => {
-                const expected = item.quantity != null ? item.quantity : 1;
-                const total = toSafeCount(item.goodCount || 0) + toSafeCount(item.scrapCount || 0) + toSafeCount(item.holdCount || 0);
-                return expected > 0 && total !== expected;
-              });
-              if (wrongItem) {
-                alert('Количество по изделию "' + (wrongItem.name || 'Изделие') + '" не совпадает');
-                return;
-              }
-            } else if (qtyTotal > 0) {
-              const sum = toSafeCount(op.goodCount || 0) + toSafeCount(op.scrapCount || 0) + toSafeCount(op.holdCount || 0);
-              if (sum !== qtyTotal) {
-                alert('Количество деталей не совпадает');
-                return;
-              }
-            }
-            op.startedAt = null;
-            op.finishedAt = now;
-            op.lastPausedAt = null;
-            op.actualSeconds = op.elapsedSeconds || 0;
-            op.status = 'DONE';
-          }
+function renderWorkspaceView() {
+  const wrapper = document.getElementById('workspace-results');
+  if (!wrapper) return;
 
-          recalcCardStatus(card);
-          if (prevStatus !== op.status) {
-            recordCardLog(card, { action: 'Статус операции', object: opLogLabel(op), field: 'status', targetId: op.id, oldValue: prevStatus, newValue: op.status });
-          }
-          if (prevElapsed !== op.elapsedSeconds && op.status === 'DONE') {
-            recordCardLog(card, { action: 'Факт. время', object: opLogLabel(op), field: 'elapsedSeconds', targetId: op.id, oldValue: Math.round(prevElapsed), newValue: Math.round(op.elapsedSeconds || 0) });
-          }
-          if (prevCardStatus !== card.status) {
-            recordCardLog(card, { action: 'Статус карты', object: 'Карта', field: 'status', oldValue: prevCardStatus, newValue: card.status });
-          }
-          saveData();
-          renderEverything();
-        }, { anchorCardId: cardId, anchorGroupId });
-      } finally {
-        suppressWorkorderAutoscroll = false;
+  const termRaw = workspaceSearchTerm.trim();
+  const digitsOnly = termRaw.replace(/\D/g, '');
+  if (!digitsOnly) {
+    wrapper.innerHTML = '<p>Введите номер техкарты или группы.</p>';
+    return;
+  }
+
+  if (!/^\d{13}$/.test(digitsOnly)) {
+    wrapper.innerHTML = '<p>Введите номер карты в формате EAN-13 (13 цифр).</p>';
+    return;
+  }
+
+  const candidates = cards.filter(card => !card.archived && (card.barcode || '') === digitsOnly);
+
+  if (!candidates.length) {
+    wrapper.innerHTML = '<p>Карты по запросу не найдены.</p>';
+    return;
+  }
+
+  let html = '';
+  candidates.forEach(card => {
+    if (card.operations && card.operations.length) {
+      html += buildWorkspaceCardDetails(card);
+    }
+  });
+
+  if (!html) {
+    wrapper.innerHTML = '<p>Нет карт с маршрутами для отображения.</p>';
+    return;
+  }
+
+  wrapper.innerHTML = html;
+
+  wrapper.querySelectorAll('.barcode-view-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = btn.getAttribute('data-card-id');
+      const card = cards.find(c => c.id === id);
+      if (!card) return;
+      openBarcodeModal(card);
+    });
+  });
+
+  wrapper.querySelectorAll('button[data-attach-card]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = btn.getAttribute('data-attach-card');
+      openAttachmentsModal(id, 'live');
+    });
+  });
+
+  wrapper.querySelectorAll('.wo-card button[data-action]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const action = btn.getAttribute('data-action');
+      const cardId = btn.getAttribute('data-card-id');
+      const opId = btn.getAttribute('data-op-id');
+      const card = cards.find(c => c.id === cardId);
+      const op = card ? (card.operations || []).find(o => o.id === opId) : null;
+      if (!card || !op) return;
+
+      if (action === 'stop') {
+        openWorkspaceStopModal(card, op);
+      } else {
+        applyOperationAction(action, card, op, { useWorkorderScrollLock: false });
       }
     });
   });
+}
+
+function getWorkspaceModalInputs() {
+  return [
+    document.getElementById('workspace-stop-good'),
+    document.getElementById('workspace-stop-scrap'),
+    document.getElementById('workspace-stop-hold')
+  ].filter(Boolean);
+}
+
+function setWorkspaceActiveInput(input) {
+  workspaceActiveModalInput = input || null;
+  if (workspaceActiveModalInput) {
+    workspaceActiveModalInput.focus();
+    workspaceActiveModalInput.select();
+  }
+}
+
+function focusWorkspaceNextInput() {
+  const inputs = getWorkspaceModalInputs();
+  if (!inputs.length) return;
+  const active = document.activeElement && inputs.includes(document.activeElement)
+    ? document.activeElement
+    : workspaceActiveModalInput;
+  const idx = Math.max(0, inputs.indexOf(active));
+  const next = inputs[(idx + 1) % inputs.length];
+  setWorkspaceActiveInput(next);
+}
+
+function openWorkspaceStopModal(card, op) {
+  const modal = document.getElementById('workspace-stop-modal');
+  if (!modal) return;
+  workspaceStopContext = { cardId: card.id, opId: op.id };
+  const totalEl = document.getElementById('workspace-stop-total');
+  if (totalEl) {
+    const qty = getOperationQuantity(op, card);
+    totalEl.textContent = qty === '' ? '–' : toSafeCount(qty);
+  }
+  const [goodInput, scrapInput, holdInput] = getWorkspaceModalInputs();
+  if (goodInput) goodInput.value = toSafeCount(op.goodCount || 0);
+  if (scrapInput) scrapInput.value = toSafeCount(op.scrapCount || 0);
+  if (holdInput) holdInput.value = toSafeCount(op.holdCount || 0);
+  modal.classList.remove('hidden');
+  setWorkspaceActiveInput(goodInput || scrapInput || holdInput || null);
+}
+
+function closeWorkspaceStopModal() {
+  const modal = document.getElementById('workspace-stop-modal');
+  if (modal) modal.classList.add('hidden');
+  workspaceStopContext = null;
+  workspaceActiveModalInput = null;
+}
+
+function applyWorkspaceKeypad(key) {
+  const inputs = getWorkspaceModalInputs();
+  if (!inputs.length) return;
+  const target = (document.activeElement && inputs.includes(document.activeElement))
+    ? document.activeElement
+    : workspaceActiveModalInput || inputs[0];
+  if (!target) return;
+
+  let value = target.value || '';
+  if (key === 'back') {
+    value = value.slice(0, -1);
+  } else if (key === 'clear') {
+    value = '';
+  } else if (/^\d$/.test(key)) {
+    value = value + key;
+  }
+  target.value = value.replace(/^0+(?=\d)/, '');
+  setWorkspaceActiveInput(target);
+}
+
+function submitWorkspaceStopModal() {
+  if (!workspaceStopContext) {
+    closeWorkspaceStopModal();
+    return;
+  }
+  const card = cards.find(c => c.id === workspaceStopContext.cardId);
+  const op = card ? (card.operations || []).find(o => o.id === workspaceStopContext.opId) : null;
+  if (!card || !op) {
+    closeWorkspaceStopModal();
+    return;
+  }
+
+  const inputs = getWorkspaceModalInputs();
+  const [goodInput, scrapInput, holdInput] = inputs;
+  const goodVal = toSafeCount(goodInput ? goodInput.value : 0);
+  const scrapVal = toSafeCount(scrapInput ? scrapInput.value : 0);
+  const holdVal = toSafeCount(holdInput ? holdInput.value : 0);
+
+  const prevGood = toSafeCount(op.goodCount || 0);
+  const prevScrap = toSafeCount(op.scrapCount || 0);
+  const prevHold = toSafeCount(op.holdCount || 0);
+
+  op.goodCount = goodVal;
+  op.scrapCount = scrapVal;
+  op.holdCount = holdVal;
+
+  if (prevGood !== goodVal) {
+    recordCardLog(card, { action: 'Количество деталей', object: opLogLabel(op), field: 'goodCount', targetId: op.id, oldValue: prevGood, newValue: goodVal });
+  }
+  if (prevScrap !== scrapVal) {
+    recordCardLog(card, { action: 'Количество деталей', object: opLogLabel(op), field: 'scrapCount', targetId: op.id, oldValue: prevScrap, newValue: scrapVal });
+  }
+  if (prevHold !== holdVal) {
+    recordCardLog(card, { action: 'Количество деталей', object: opLogLabel(op), field: 'holdCount', targetId: op.id, oldValue: prevHold, newValue: holdVal });
+  }
+
+  closeWorkspaceStopModal();
+  applyOperationAction('stop', card, op, { useWorkorderScrollLock: false });
 }
 
 function buildArchiveCardDetails(card, { opened = false } = {}) {
@@ -3850,6 +4111,9 @@ function setupNavigation() {
         renderWorkordersTable({ collapseAll: true });
       } else if (target === 'archive') {
         renderArchiveTable();
+      } else if (target === 'workspace') {
+        renderWorkspaceView();
+        focusWorkspaceSearch();
       } else if (target === 'dashboard' && window.dashboardPager && typeof window.dashboardPager.updatePages === 'function') {
         requestAnimationFrame(() => window.dashboardPager.updatePages());
       }
@@ -3902,6 +4166,14 @@ function focusCardsSection() {
     btn.classList.toggle('active', target === 'cards');
   });
   setCardsTab('list');
+}
+
+function focusWorkspaceSearch() {
+  const input = document.getElementById('workspace-search');
+  if (input) {
+    input.focus();
+    input.select();
+  }
 }
 
 function focusCardsSection() {
@@ -4209,6 +4481,47 @@ function setupForms() {
       renderArchiveTable();
     });
   }
+
+  const workspaceSearchInput = document.getElementById('workspace-search');
+  const workspaceSearchSubmit = document.getElementById('workspace-search-submit');
+  const workspaceSearchClear = document.getElementById('workspace-search-clear');
+  const sanitizeWorkspaceTerm = (value = '') => (value || '').replace(/\D/g, '').slice(0, 13);
+  const triggerWorkspaceSearch = () => {
+    workspaceSearchTerm = workspaceSearchInput ? sanitizeWorkspaceTerm(workspaceSearchInput.value || '') : '';
+    if (workspaceSearchInput) {
+      workspaceSearchInput.value = workspaceSearchTerm;
+    }
+    renderWorkspaceView();
+  };
+
+  if (workspaceSearchInput) {
+    workspaceSearchInput.addEventListener('input', e => {
+      const sanitized = sanitizeWorkspaceTerm(e.target.value || '');
+      if (sanitized !== e.target.value) {
+        e.target.value = sanitized;
+      }
+      workspaceSearchTerm = sanitized;
+    });
+    workspaceSearchInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        triggerWorkspaceSearch();
+      }
+    });
+  }
+  if (workspaceSearchSubmit) {
+    workspaceSearchSubmit.addEventListener('click', triggerWorkspaceSearch);
+  }
+  if (workspaceSearchClear) {
+    workspaceSearchClear.addEventListener('click', () => {
+      workspaceSearchTerm = '';
+      if (workspaceSearchInput) {
+        workspaceSearchInput.value = '';
+        focusWorkspaceSearch();
+      }
+      renderWorkspaceView();
+    });
+  }
 }
 
 // === ОБЩИЙ РЕНДЕР ===
@@ -4225,6 +4538,7 @@ function renderEverything() {
   fillRouteSelectors();
   renderWorkordersTable();
   renderArchiveTable();
+  renderWorkspaceView();
 }
 
 function setupGroupTransferModal() {
@@ -4272,17 +4586,61 @@ function setupAttachmentControls() {
   }
 }
 
+function setupWorkspaceModal() {
+  const modal = document.getElementById('workspace-stop-modal');
+  if (!modal) return;
+
+  const keypadButtons = modal.querySelectorAll('.workspace-keypad button[data-key]');
+  keypadButtons.forEach(btn => {
+    btn.addEventListener('click', () => applyWorkspaceKeypad(btn.getAttribute('data-key')));
+  });
+
+  const enterBtn = document.getElementById('workspace-stop-enter');
+  if (enterBtn) {
+    enterBtn.addEventListener('click', () => submitWorkspaceStopModal());
+  }
+
+  const nextBtn = document.getElementById('workspace-stop-next');
+  if (nextBtn) {
+    nextBtn.addEventListener('click', () => focusWorkspaceNextInput());
+  }
+
+  const confirmBtn = document.getElementById('workspace-stop-confirm');
+  if (confirmBtn) {
+    confirmBtn.addEventListener('click', () => submitWorkspaceStopModal());
+  }
+
+  const cancelBtn = document.getElementById('workspace-stop-cancel');
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', () => closeWorkspaceStopModal());
+  }
+
+  getWorkspaceModalInputs().forEach(input => {
+    input.addEventListener('focus', () => setWorkspaceActiveInput(input));
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submitWorkspaceStopModal();
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        focusWorkspaceNextInput();
+      }
+    });
+  });
+}
+
 // === ИНИЦИАЛИЗАЦИЯ ===
   document.addEventListener('DOMContentLoaded', async () => {
     startRealtimeClock();
     await loadData();
     setupNavigation();
-  setupCardsTabs();
-  setupForms();
-  setupBarcodeModal();
-  setupGroupTransferModal();
-  setupGroupExecutorModal();
+    setupCardsTabs();
+    setupForms();
+    setupBarcodeModal();
+    setupGroupTransferModal();
+    setupGroupExecutorModal();
     setupAttachmentControls();
+    setupWorkspaceModal();
     setupLogModal();
     renderEverything();
     if (window.dashboardPager && typeof window.dashboardPager.updatePages === 'function') {

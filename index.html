@@ -17,6 +17,7 @@
         <button class="nav-btn" data-target="cards">Тех. карты</button>
         <button class="nav-btn" data-target="workorders">Трекер</button>
         <button class="nav-btn" data-target="archive">Архив</button>
+        <button class="nav-btn" data-target="workspace"><span class="nav-btn-multiline">Рабочее<br>место</span></button>
       </nav>
     </header>
 
@@ -136,6 +137,29 @@
           Архивные карты доступны только для просмотра. При необходимости нажмите «Повторить», чтобы создать копию и перезапустить процесс.
         </p>
         <div id="archive-table-wrapper"></div>
+      </div>
+    </section>
+
+    <!-- Рабочее место -->
+    <section id="workspace">
+      <div class="card">
+        <h2>Рабочее место</h2>
+        <div class="workspace-search-row">
+          <label for="workspace-search" class="workspace-search-label">Поиск техкарты или группы</label>
+          <input
+            id="workspace-search"
+            class="workspace-search-input"
+            placeholder="Введите № EAN-13"
+            inputmode="numeric"
+            pattern="\d{13}"
+            maxlength="13"
+          />
+          <div class="workspace-search-actions">
+            <button class="btn-primary workspace-search-btn" id="workspace-search-submit">Ввод</button>
+            <button class="btn-secondary workspace-search-btn" id="workspace-search-clear">Удалить</button>
+          </div>
+        </div>
+        <div id="workspace-results"></div>
       </div>
     </section>
     <div id="card-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="card-modal-title">
@@ -318,6 +342,46 @@
       <div class="modal-actions">
         <button type="button" id="group-executor-submit" class="btn-primary">Создать</button>
         <button type="button" id="group-executor-cancel" class="btn-secondary">Отмена</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="workspace-stop-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="workspace-stop-title">
+    <div class="modal-content workspace-stop-content">
+      <div class="modal-header">
+        <h3 id="workspace-stop-title">Введите количество деталей</h3>
+        <p class="workspace-stop-total" aria-live="polite">Количество изделий всего: <span id="workspace-stop-total">–</span> шт.</p>
+      </div>
+      <div class="modal-body workspace-stop-body">
+        <div class="workspace-stop-fields">
+          <label>Годные <input type="number" id="workspace-stop-good" inputmode="numeric" min="0" /></label>
+          <label>Брак <input type="number" id="workspace-stop-scrap" inputmode="numeric" min="0" /></label>
+          <label>Задержано <input type="number" id="workspace-stop-hold" inputmode="numeric" min="0" /></label>
+        </div>
+        <div class="workspace-stop-controls">
+          <div class="workspace-stop-buttons">
+            <button type="button" id="workspace-stop-enter" class="btn-primary workspace-stop-btn">Ввод</button>
+            <button type="button" id="workspace-stop-next" class="btn-secondary workspace-stop-btn">Следующее окно</button>
+          </div>
+          <div class="workspace-keypad" aria-label="Экранная клавиатура">
+            <button type="button" data-key="1">1</button>
+            <button type="button" data-key="2">2</button>
+            <button type="button" data-key="3">3</button>
+            <button type="button" data-key="4">4</button>
+            <button type="button" data-key="5">5</button>
+            <button type="button" data-key="6">6</button>
+            <button type="button" data-key="7">7</button>
+            <button type="button" data-key="8">8</button>
+            <button type="button" data-key="9">9</button>
+            <button type="button" data-key="0">0</button>
+            <button type="button" data-key="back">⌫</button>
+            <button type="button" data-key="clear">Стереть</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions workspace-stop-actions">
+        <button type="button" id="workspace-stop-confirm" class="btn-primary workspace-stop-action-btn">Подтвердить</button>
+        <button type="button" id="workspace-stop-cancel" class="btn-secondary workspace-stop-action-btn">Отмена</button>
       </div>
     </div>
   </div>
