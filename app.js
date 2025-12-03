@@ -1114,7 +1114,7 @@ function renderDashboard() {
       }
     }
 
-    const qtyTotal = toSafeCount(card.quantity);
+    const qtyTotal = toSafeCount(card.quantity != null ? card.quantity : (card.initialSnapshot && card.initialSnapshot.quantity));
     let qtyCell = '—';
 
     if (card.status === 'DONE') {
