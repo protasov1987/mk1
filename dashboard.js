@@ -47,13 +47,21 @@
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
     const dotsHeight = state.dotsContainer ? state.dotsContainer.offsetHeight || 24 : 24;
     const card = state.container.closest('.card');
-    let bottomGap = 32; // на случай отсутствия родителя card
+    const main = state.container.closest('main');
+    let bottomGap = 32; // запас на случай отсутствия родителей
 
     if (card) {
       const styles = window.getComputedStyle(card);
       const marginBottom = parseFloat(styles.marginBottom) || 0;
       const paddingBottom = parseFloat(styles.paddingBottom) || 0;
       bottomGap = marginBottom + paddingBottom + 8;
+    }
+
+    if (main) {
+      const mainStyles = window.getComputedStyle(main);
+      const mainPadding = parseFloat(mainStyles.paddingBottom) || 0;
+      const mainMargin = parseFloat(mainStyles.marginBottom) || 0;
+      bottomGap += mainPadding + mainMargin;
     }
 
     const available = viewportHeight - rect.top - dotsHeight - bottomGap;
