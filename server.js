@@ -795,9 +795,11 @@ function findAttachment(data, attachmentId) {
 
 async function handleFileRoutes(req, res) {
   const parsed = url.parse(req.url, true);
-  const session = await requireSession(req, res, { permission: { area: 'cards', type: req.method === 'GET' ? 'view' : 'change' } });
-  if (!session) return true;
-  if (req.method === 'GET' && parsed.pathname.startsWith('/files/')) {
+  const pathname = parsed.pathname || '';
+
+  if (req.method === 'GET' && pathname.startsWith('/files/')) {
+    const session = await requireSession(req, res, { permission: { area: 'cards', type: 'view' } });
+    if (!session) return true;
     const attachmentId = parsed.pathname.replace('/files/', '');
     const data = await database.getData();
     const match = findAttachment(data, attachmentId);
@@ -823,7 +825,9 @@ async function handleFileRoutes(req, res) {
     return true;
   }
 
-  if (req.method === 'GET' && parsed.pathname.startsWith('/api/cards/') && parsed.pathname.endsWith('/files')) {
+  if (req.method === 'GET' && pathname.startsWith('/api/cards/') && pathname.endsWith('/files')) {
+    const session = await requireSession(req, res, { permission: { area: 'cards', type: 'view' } });
+    if (!session) return true;
     const cardId = parsed.pathname.split('/')[3];
     const data = await database.getData();
     const card = (data.cards || []).find(c => c.id === cardId);
@@ -835,7 +839,9 @@ async function handleFileRoutes(req, res) {
     return true;
   }
 
-  if (req.method === 'POST' && parsed.pathname.startsWith('/api/cards/') && parsed.pathname.endsWith('/files')) {
+  if (req.method === 'POST' && pathname.startsWith('/api/cards/') && pathname.endsWith('/files')) {
+    const session = await requireSession(req, res, { permission: { area: 'cards', type: 'change' } });
+    if (!session) return true;
     const cardId = parsed.pathname.split('/')[3];
     if (!hasPermission(session.level, { area: 'attachments', type: 'upload' })) {
       sendJson(res, 403, { error: 'Нет прав на загрузку файлов' });
