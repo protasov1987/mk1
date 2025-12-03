@@ -14,7 +14,8 @@
     lastAvailableHeight: null,
     lastKnownWidth: null,
     emptyMessage: '',
-    resizeTimer: null
+    resizeTimer: null,
+    lastRenderKey: null
   };
 
   function ensureContainer() {
@@ -45,8 +46,17 @@
     const rect = state.container.getBoundingClientRect();
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
     const dotsHeight = state.dotsContainer ? state.dotsContainer.offsetHeight || 24 : 24;
-    const padding = 24;
-    const available = viewportHeight - rect.top - dotsHeight - padding;
+    const card = state.container.closest('.card');
+    let bottomGap = 32; // на случай отсутствия родителя card
+
+    if (card) {
+      const styles = window.getComputedStyle(card);
+      const marginBottom = parseFloat(styles.marginBottom) || 0;
+      const paddingBottom = parseFloat(styles.paddingBottom) || 0;
+      bottomGap = marginBottom + paddingBottom + 8;
+    }
+
+    const available = viewportHeight - rect.top - dotsHeight - bottomGap;
     if (available > 0) {
       state.lastAvailableHeight = available;
       return available;
@@ -222,9 +232,11 @@
     if (availableHeight) {
       state.tableArea.style.maxHeight = availableHeight + 'px';
       state.tableArea.style.minHeight = availableHeight + 'px';
+      state.tableArea.style.height = availableHeight + 'px';
     } else {
       state.tableArea.style.maxHeight = '';
       state.tableArea.style.minHeight = '';
+      state.tableArea.style.height = '';
     }
 
     state.pages = paginateRows(state.rowsHtml);
@@ -239,9 +251,28 @@
 
   function render(payload) {
     if (!payload) return;
-    state.headerHtml = payload.headerHtml || '';
-    state.rowsHtml = Array.isArray(payload.rowsHtml) ? payload.rowsHtml : [];
-    state.emptyMessage = payload.emptyMessage || '';
+    const incomingRows = Array.isArray(payload.rowsHtml) ? payload.rowsHtml : [];
+    const header = payload.headerHtml || '';
+    const emptyMessage = payload.emptyMessage || '';
+    const renderKey = header + '|' + emptyMessage + '|' + incomingRows.join('');
+
+    const noChanges = state.lastRenderKey && state.lastRenderKey === renderKey;
+
+    state.headerHtml = header;
+    state.rowsHtml = incomingRows;
+    state.emptyMessage = emptyMessage;
+    state.lastRenderKey = renderKey;
+
+    if (noChanges && state.container) {
+      const availableHeight = getAvailableHeight();
+      if (availableHeight) {
+        state.tableArea.style.maxHeight = availableHeight + 'px';
+        state.tableArea.style.minHeight = availableHeight + 'px';
+        state.tableArea.style.height = availableHeight + 'px';
+      }
+      return;
+    }
+
     updatePages();
   }
 
