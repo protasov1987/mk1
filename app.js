@@ -1481,8 +1481,20 @@ function printGroupList(groupId) {
   const children = getGroupChildren(group).filter(c => !c.archived);
   const win = window.open('', '_blank');
   if (!win) return;
-  win.document.write('<html><head><title>Список карт группы</title></head><body>');
+  win.document.write('<html><head><title>Список карт группы</title><style> .print-meta { margin: 12px 0; } .print-meta div { margin: 4px 0; font-size: 14px; } </style></head><body>');
   win.document.write('<h3>Группа: ' + escapeHtml(group.name || '') + '</h3>');
+
+  if (children.length > 0) {
+    const firstCard = children[0];
+    win.document.write('<div class="print-meta">');
+    win.document.write('<div><strong>Номер / код заказа:</strong> ' + escapeHtml(firstCard.orderNo || '') + '</div>');
+    win.document.write('<div><strong>Чертёж / обозначение детали:</strong> ' + escapeHtml(firstCard.drawing || '') + '</div>');
+    win.document.write('<div><strong>Материал:</strong> ' + escapeHtml(firstCard.material || '') + '</div>');
+    win.document.write('<div><strong>Номер договора:</strong> ' + escapeHtml(firstCard.contractNumber || '') + '</div>');
+    win.document.write('<div><strong>Описание:</strong> ' + escapeHtml(firstCard.desc || '') + '</div>');
+    win.document.write('</div>');
+  }
+
   win.document.write('<ol>');
   children.forEach(child => {
     win.document.write('<li>' + escapeHtml(child.name || '') + ' — ' + escapeHtml(child.barcode || '') + '</li>');
