@@ -153,17 +153,34 @@ nav {
 }
 
 .workspace-search-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   gap: 12px;
-  align-items: flex-end;
-  flex-wrap: wrap;
+  align-items: center;
   margin-bottom: 12px;
+}
+
+.workspace-search-label {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.workspace-search-input {
+  width: 100%;
+  font-size: 16px;
+  padding: 14px 12px;
+  min-height: 56px;
 }
 
 .workspace-search-actions {
   display: flex;
-  gap: 8px;
-  align-items: flex-end;
-  flex: 0 0 auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.workspace-search-btn {
+  padding: 14px 18px;
+  font-size: 16px;
 }
 
 #workspace-results .wo-card {
@@ -206,6 +223,11 @@ nav {
   flex-wrap: wrap;
 }
 
+.workspace-stop-btn {
+  padding: 14px 18px;
+  font-size: 16px;
+}
+
 .workspace-keypad {
   display: grid;
   grid-template-columns: repeat(3, minmax(60px, 1fr));
@@ -216,6 +238,22 @@ nav {
   padding: 12px 8px;
   font-size: 16px;
   cursor: pointer;
+}
+
+.workspace-stop-total {
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: #374151;
+}
+
+.workspace-stop-actions {
+  justify-content: center;
+  gap: 14px;
+}
+
+.workspace-stop-action-btn {
+  padding: 14px 20px;
+  font-size: 16px;
 }
 
 .hidden {

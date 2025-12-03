@@ -3699,14 +3699,18 @@ function renderWorkspaceView() {
   if (!wrapper) return;
 
   const termRaw = workspaceSearchTerm.trim();
-  if (!termRaw) {
+  const digitsOnly = termRaw.replace(/\D/g, '');
+  if (!digitsOnly) {
     wrapper.innerHTML = '<p>Введите номер техкарты или группы.</p>';
     return;
   }
 
-  const rootCards = cards.filter(c => !c.archived && !c.groupId);
-  const scoreFn = (card) => cardSearchScoreWithChildren(card, termRaw);
-  const candidates = rootCards.filter(card => scoreFn(card) > 0).sort((a, b) => scoreFn(b) - scoreFn(a));
+  if (!/^\d{13}$/.test(digitsOnly)) {
+    wrapper.innerHTML = '<p>Введите номер карты в формате EAN-13 (13 цифр).</p>';
+    return;
+  }
+
+  const candidates = cards.filter(card => !card.archived && (card.barcode || '') === digitsOnly);
 
   if (!candidates.length) {
     wrapper.innerHTML = '<p>Карты по запросу не найдены.</p>';
@@ -3715,9 +3719,7 @@ function renderWorkspaceView() {
 
   let html = '';
   candidates.forEach(card => {
-    if (isGroupCard(card)) {
-      html += buildWorkspaceGroupDetails(card);
-    } else if (card.operations && card.operations.length) {
+    if (card.operations && card.operations.length) {
       html += buildWorkspaceCardDetails(card);
     }
   });
@@ -3800,6 +3802,11 @@ function openWorkspaceStopModal(card, op) {
   const modal = document.getElementById('workspace-stop-modal');
   if (!modal) return;
   workspaceStopContext = { cardId: card.id, opId: op.id };
+  const totalEl = document.getElementById('workspace-stop-total');
+  if (totalEl) {
+    const qty = getOperationQuantity(op, card);
+    totalEl.textContent = qty === '' ? '–' : toSafeCount(qty);
+  }
   const [goodInput, scrapInput, holdInput] = getWorkspaceModalInputs();
   if (goodInput) goodInput.value = toSafeCount(op.goodCount || 0);
   if (scrapInput) scrapInput.value = toSafeCount(op.scrapCount || 0);
@@ -4478,14 +4485,22 @@ function setupForms() {
   const workspaceSearchInput = document.getElementById('workspace-search');
   const workspaceSearchSubmit = document.getElementById('workspace-search-submit');
   const workspaceSearchClear = document.getElementById('workspace-search-clear');
+  const sanitizeWorkspaceTerm = (value = '') => (value || '').replace(/\D/g, '').slice(0, 13);
   const triggerWorkspaceSearch = () => {
-    workspaceSearchTerm = workspaceSearchInput ? (workspaceSearchInput.value || '') : '';
+    workspaceSearchTerm = workspaceSearchInput ? sanitizeWorkspaceTerm(workspaceSearchInput.value || '') : '';
+    if (workspaceSearchInput) {
+      workspaceSearchInput.value = workspaceSearchTerm;
+    }
     renderWorkspaceView();
   };
 
   if (workspaceSearchInput) {
     workspaceSearchInput.addEventListener('input', e => {
-      workspaceSearchTerm = e.target.value || '';
+      const sanitized = sanitizeWorkspaceTerm(e.target.value || '');
+      if (sanitized !== e.target.value) {
+        e.target.value = sanitized;
+      }
+      workspaceSearchTerm = sanitized;
     });
     workspaceSearchInput.addEventListener('keydown', e => {
       if (e.key === 'Enter') {

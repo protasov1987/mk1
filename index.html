@@ -144,14 +144,19 @@
     <section id="workspace">
       <div class="card">
         <h2>Рабочее место</h2>
-        <div class="flex workspace-search-row">
-          <div class="flex-col" style="flex:1 1 260px;">
-            <label for="workspace-search">Поиск техкарты или группы</label>
-            <input id="workspace-search" placeholder="Введите № EAN-13, название, номер заказа или группы, номер договора" />
-          </div>
-          <div class="flex-col workspace-search-actions">
-            <button class="btn-primary" id="workspace-search-submit">Ввод</button>
-            <button class="btn-secondary" id="workspace-search-clear">Удалить</button>
+        <div class="workspace-search-row">
+          <label for="workspace-search" class="workspace-search-label">Поиск техкарты или группы</label>
+          <input
+            id="workspace-search"
+            class="workspace-search-input"
+            placeholder="Введите № EAN-13"
+            inputmode="numeric"
+            pattern="\d{13}"
+            maxlength="13"
+          />
+          <div class="workspace-search-actions">
+            <button class="btn-primary workspace-search-btn" id="workspace-search-submit">Ввод</button>
+            <button class="btn-secondary workspace-search-btn" id="workspace-search-clear">Удалить</button>
           </div>
         </div>
         <div id="workspace-results"></div>
@@ -345,6 +350,7 @@
     <div class="modal-content workspace-stop-content">
       <div class="modal-header">
         <h3 id="workspace-stop-title">Введите количество деталей</h3>
+        <p class="workspace-stop-total" aria-live="polite">Количество изделий всего: <span id="workspace-stop-total">–</span> шт.</p>
       </div>
       <div class="modal-body workspace-stop-body">
         <div class="workspace-stop-fields">
@@ -354,8 +360,8 @@
         </div>
         <div class="workspace-stop-controls">
           <div class="workspace-stop-buttons">
-            <button type="button" id="workspace-stop-enter" class="btn-primary">Ввод</button>
-            <button type="button" id="workspace-stop-next" class="btn-secondary">Следующее окно</button>
+            <button type="button" id="workspace-stop-enter" class="btn-primary workspace-stop-btn">Ввод</button>
+            <button type="button" id="workspace-stop-next" class="btn-secondary workspace-stop-btn">Следующее окно</button>
           </div>
           <div class="workspace-keypad" aria-label="Экранная клавиатура">
             <button type="button" data-key="1">1</button>
@@ -373,9 +379,9 @@
           </div>
         </div>
       </div>
-      <div class="modal-actions">
-        <button type="button" id="workspace-stop-confirm" class="btn-primary">Подтвердить</button>
-        <button type="button" id="workspace-stop-cancel" class="btn-secondary">Отмена</button>
+      <div class="modal-actions workspace-stop-actions">
+        <button type="button" id="workspace-stop-confirm" class="btn-primary workspace-stop-action-btn">Подтвердить</button>
+        <button type="button" id="workspace-stop-cancel" class="btn-secondary workspace-stop-action-btn">Отмена</button>
       </div>
     </div>
   </div>
