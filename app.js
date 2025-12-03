@@ -157,6 +157,31 @@ function toSafeCount(val) {
   return num;
 }
 
+function getCardPlannedQuantity(card) {
+  if (!card) return { qty: null, hasValue: false };
+  const rawQty = card.quantity !== '' && card.quantity != null
+    ? card.quantity
+    : (card.initialSnapshot && card.initialSnapshot.quantity);
+
+  if (rawQty !== '' && rawQty != null) {
+    return { qty: toSafeCount(rawQty), hasValue: true };
+  }
+
+  const snapshotItems = Array.isArray(card.initialSnapshot && card.initialSnapshot.items)
+    ? card.initialSnapshot.items.length
+    : null;
+  if (snapshotItems) {
+    return { qty: snapshotItems, hasValue: true };
+  }
+
+  const itemsCount = Array.isArray(card.items) ? card.items.length : null;
+  if (itemsCount) {
+    return { qty: itemsCount, hasValue: true };
+  }
+
+  return { qty: null, hasValue: false };
+}
+
 function formatStepCode(step) {
   return String(step * 5).padStart(3, '0');
 }
@@ -180,6 +205,25 @@ function sumItemCounts(items = []) {
     acc.hold += toSafeCount(item && item.holdCount != null ? item.holdCount : 0);
     return acc;
   }, { good: 0, scrap: 0, hold: 0 });
+}
+
+function calculateFinalResults(operations = [], initialQty = 0) {
+  const total = toSafeCount(initialQty);
+  const opsSorted = Array.isArray(operations)
+    ? operations.filter(Boolean).slice().sort((a, b) => (a.order || 0) - (b.order || 0))
+    : [];
+
+  const lastOp = opsSorted[opsSorted.length - 1];
+  const goodFinal = toSafeCount(lastOp && lastOp.goodCount != null ? lastOp.goodCount : 0);
+  const scrapFinal = toSafeCount(lastOp && lastOp.scrapCount != null ? lastOp.scrapCount : 0);
+  const delayedFinal = toSafeCount(lastOp && lastOp.holdCount != null ? lastOp.holdCount : 0);
+
+  return {
+    good_final: goodFinal,
+    scrap_final: scrapFinal,
+    delayed_final: delayedFinal,
+    summary_ok: total === 0 || goodFinal + scrapFinal + delayedFinal === total
+  };
 }
 
 function buildItemsFromTemplate(template = [], qty = 0) {
@@ -1069,20 +1113,26 @@ function renderDashboard() {
       }
     }
 
-    const qtyTotal = toSafeCount(card.quantity);
-    const qtyLines = opsForDisplay.length
-      ? opsForDisplay.map(op => {
+    const { qty: qtyTotal, hasValue: hasQty } = getCardPlannedQuantity(card);
+    let qtyCell = '—';
+
+    if (card.status === 'DONE' && hasQty) {
+      const batchResult = calculateFinalResults(opsArr, qtyTotal || 0);
+      const qtyText = (batchResult.good_final || 0) + ' из ' + qtyTotal;
+      qtyCell = '<div class="dash-qty-line">' + qtyText + '</div>';
+    } else if (opsForDisplay.length && hasQty) {
+      const qtyLines = opsForDisplay.map(op => {
         const good = toSafeCount(op.goodCount || 0);
-        const qtyText = qtyTotal > 0 ? (good + ' из ' + qtyTotal) : '—';
+        const qtyText = good + ' из ' + qtyTotal;
         return '<div class="dash-qty-line">' + qtyText + '</div>';
-      })
-      : [];
+      });
+      qtyCell = qtyLines.length ? qtyLines.join('') : '—';
+    }
 
     const completedCount = opsArr.filter(o => o.status === 'DONE').length;
     const commentLines = opsForDisplay
       .filter(o => o.comment)
       .map(o => '<div class="dash-comment-line"><span class="dash-comment-op">' + renderOpLabel(o) + ':</span> ' + escapeHtml(o.comment) + '</div>');
-    const qtyCell = qtyLines.length ? qtyLines.join('') : '—';
     const commentCell = commentLines.join('');
 
     const nameCell = (card.groupId ? '<span class="group-marker">(Г)</span>' : '') + escapeHtml(card.name);
@@ -1431,8 +1481,20 @@ function printGroupList(groupId) {
   const children = getGroupChildren(group).filter(c => !c.archived);
   const win = window.open('', '_blank');
   if (!win) return;
-  win.document.write('<html><head><title>Список карт группы</title></head><body>');
+  win.document.write('<html><head><title>Список карт группы</title><style> .print-meta { margin: 12px 0; } .print-meta div { margin: 4px 0; font-size: 14px; } </style></head><body>');
   win.document.write('<h3>Группа: ' + escapeHtml(group.name || '') + '</h3>');
+
+  if (children.length > 0) {
+    const firstCard = children[0];
+    win.document.write('<div class="print-meta">');
+    win.document.write('<div><strong>Номер / код заказа:</strong> ' + escapeHtml(firstCard.orderNo || '') + '</div>');
+    win.document.write('<div><strong>Чертёж / обозначение детали:</strong> ' + escapeHtml(firstCard.drawing || '') + '</div>');
+    win.document.write('<div><strong>Материал:</strong> ' + escapeHtml(firstCard.material || '') + '</div>');
+    win.document.write('<div><strong>Номер договора:</strong> ' + escapeHtml(firstCard.contractNumber || '') + '</div>');
+    win.document.write('<div><strong>Описание:</strong> ' + escapeHtml(firstCard.desc || '') + '</div>');
+    win.document.write('</div>');
+  }
+
   win.document.write('<ol>');
   children.forEach(child => {
     win.document.write('<li>' + escapeHtml(child.name || '') + ' — ' + escapeHtml(child.barcode || '') + '</li>');
