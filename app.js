@@ -216,6 +216,7 @@ function calculateFinalResults(operations = [], initialQty = 0) {
   let remaining = total;
   let delayed = 0;
   let scrapTotal = 0;
+  let goodTracked = 0;
 
   opsSorted.forEach(op => {
     const good = toSafeCount(op && op.goodCount != null ? op.goodCount : 0);
@@ -235,20 +236,21 @@ function calculateFinalResults(operations = [], initialQty = 0) {
 
     const goodFromRemaining = Math.min(good - goodFromDelayed, remaining);
     remaining -= goodFromRemaining;
+    goodTracked += goodFromDelayed + goodFromRemaining;
 
     const newDelayed = Math.min(delay, remaining);
     delayed += newDelayed;
     remaining -= newDelayed;
   });
 
-  const goodFinal = remaining;
   const delayedFinal = delayed;
+  const goodFinal = Math.max(0, total - scrapTotal - delayedFinal);
 
   return {
     good_final: goodFinal,
     scrap_final: scrapTotal,
     delayed_final: delayedFinal,
-    summary_ok: goodFinal + scrapTotal + delayedFinal === total
+    summary_ok: goodFinal + scrapTotal + delayedFinal === total && goodFinal >= goodTracked
   };
 }
 
