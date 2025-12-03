@@ -127,6 +127,12 @@ nav {
   background: #10b981;
 }
 
+.nav-btn-multiline {
+  display: inline-block;
+  line-height: 1.1;
+  text-align: center;
+}
+
 .status-banner {
   margin: 0;
   padding: 10px 16px;
@@ -144,6 +150,72 @@ nav {
 .status-banner.status-info {
   background: #e0f2fe;
   color: #075985;
+}
+
+.workspace-search-row {
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.workspace-search-actions {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  flex: 0 0 auto;
+}
+
+#workspace-results .wo-card {
+  border-color: #10b981;
+}
+
+.workspace-stop-content {
+  max-width: 520px;
+}
+
+.workspace-stop-body {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.workspace-stop-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 200px;
+}
+
+.workspace-stop-fields input {
+  width: 100%;
+  font-size: 16px;
+  padding: 6px 8px;
+}
+
+.workspace-stop-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 200px;
+}
+
+.workspace-stop-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.workspace-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(60px, 1fr));
+  gap: 8px;
+}
+
+.workspace-keypad button {
+  padding: 12px 8px;
+  font-size: 16px;
+  cursor: pointer;
 }
 
 .hidden {
