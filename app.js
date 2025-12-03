@@ -1022,9 +1022,7 @@ function renderDashboard() {
   }
 
   if (!statusChanged) {
-    if (window.dashboardPager && typeof window.dashboardPager.updatePages === 'function') {
-      window.dashboardPager.updatePages();
-    }
+    updateDashboardTimers();
     return;
   }
 
@@ -1050,8 +1048,9 @@ function renderDashboard() {
         if (plannedSec && elapsed > plannedSec) {
           cls += ' dash-op-overdue';
         }
-        statusHtml += '<span class="' + cls + '">' +
-          renderOpLabel(op) + ' — ' + formatSecondsToHMS(elapsed) +
+        statusHtml += '<span class="' + cls + '" data-card-id="' + card.id + '" data-op-id="' + op.id + '">' +
+          '<span class="dash-op-label">' + renderOpLabel(op) + '</span>' +
+          ' — <span class="dash-op-time">' + formatSecondsToHMS(elapsed) + '</span>' +
           '</span>';
       });
     } else {
@@ -1107,6 +1106,28 @@ function renderDashboard() {
   } else if (dashTableWrapper) {
     dashTableWrapper.innerHTML = '<table>' + tableHeader + '<tbody>' + rowsHtml.join('') + '</tbody></table>';
   }
+}
+
+function updateDashboardTimers() {
+  const nodes = document.querySelectorAll('.dashboard-card-status .dash-op[data-card-id][data-op-id]');
+  nodes.forEach(node => {
+    const cardId = node.getAttribute('data-card-id');
+    const opId = node.getAttribute('data-op-id');
+    const card = cards.find(c => c.id === cardId);
+    const op = card ? (card.operations || []).find(o => o.id === opId) : null;
+    if (!op) return;
+
+    const elapsed = getOperationElapsedSeconds(op);
+    const plannedSec = (op.plannedMinutes || 0) * 60;
+    const timeSpan = node.querySelector('.dash-op-time');
+
+    if (timeSpan) {
+      timeSpan.textContent = formatSecondsToHMS(elapsed);
+    }
+
+    node.classList.toggle('dash-op-paused', op.status === 'PAUSED');
+    node.classList.toggle('dash-op-overdue', plannedSec && elapsed > plannedSec);
+  });
 }
 
 // === РЕНДЕРИНГ ТЕХ.КАРТ ===
@@ -3740,6 +3761,8 @@ function setupNavigation() {
         renderWorkordersTable({ collapseAll: true });
       } else if (target === 'archive') {
         renderArchiveTable();
+      } else if (target === 'dashboard' && window.dashboardPager && typeof window.dashboardPager.updatePages === 'function') {
+        requestAnimationFrame(() => window.dashboardPager.updatePages());
       }
     });
   });
@@ -4161,17 +4184,20 @@ function setupAttachmentControls() {
 }
 
 // === ИНИЦИАЛИЗАЦИЯ ===
-document.addEventListener('DOMContentLoaded', async () => {
-  startRealtimeClock();
-  await loadData();
-  setupNavigation();
+  document.addEventListener('DOMContentLoaded', async () => {
+    startRealtimeClock();
+    await loadData();
+    setupNavigation();
   setupCardsTabs();
   setupForms();
   setupBarcodeModal();
   setupGroupTransferModal();
   setupGroupExecutorModal();
-  setupAttachmentControls();
-  setupLogModal();
-  renderEverything();
-  setInterval(tickTimers, 1000);
-});
+    setupAttachmentControls();
+    setupLogModal();
+    renderEverything();
+    if (window.dashboardPager && typeof window.dashboardPager.updatePages === 'function') {
+      requestAnimationFrame(() => window.dashboardPager.updatePages());
+    }
+    setInterval(tickTimers, 1000);
+  });
