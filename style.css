@@ -445,6 +445,13 @@ thead {
   margin-right: 4px;
 }
 
+.group-position {
+  color: #7c3aed;
+  font-weight: 700;
+  margin-left: 2px;
+  margin-right: 6px;
+}
+
 .group-toggle-btn {
   color: #7c3aed;
 }

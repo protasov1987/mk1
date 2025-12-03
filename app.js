@@ -1135,7 +1135,31 @@ function renderDashboard() {
       .map(o => '<div class="dash-comment-line"><span class="dash-comment-op">' + renderOpLabel(o) + ':</span> ' + escapeHtml(o.comment) + '</div>');
     const commentCell = commentLines.join('');
 
-    const nameCell = (card.groupId ? '<span class="group-marker">(Г)</span>' : '') + escapeHtml(card.name);
+    const nameCell = (() => {
+      if (!card.groupId) return escapeHtml(card.name);
+
+      const siblings = cards.filter(c => c.groupId === card.groupId && !c.archived);
+      const total = siblings.length || 0;
+      let displayName = card.name || '';
+      let position = null;
+
+      const nameMatch = /^\s*(\d+)\.\s*(.*)$/.exec(displayName || '');
+      if (nameMatch) {
+        position = toSafeCount(nameMatch[1]);
+        displayName = nameMatch[2] || '';
+      }
+
+      if (!position) {
+        const idx = siblings.findIndex(c => c.id === card.id);
+        position = idx >= 0 ? idx + 1 : null;
+      }
+
+      const prefix = position && total
+        ? '<span class="group-marker">(Г)</span><span class="group-position">' + position + '/' + total + '</span> '
+        : '<span class="group-marker">(Г)</span>';
+
+      return prefix + escapeHtml(displayName);
+    })();
     return '<tr>' +
       '<td>' + escapeHtml(card.barcode || '') + '</td>' +
       '<td>' + nameCell + '</td>' +
