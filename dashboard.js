@@ -13,7 +13,8 @@
     currentPage: 0,
     lastAvailableHeight: null,
     lastKnownWidth: null,
-    emptyMessage: ''
+    emptyMessage: '',
+    resizeTimer: null
   };
 
   function ensureContainer() {
@@ -143,13 +144,12 @@
 
     pages.forEach((page, idx) => {
       const isActive = idx === targetIndex;
+      if (immediate) {
+        page.classList.add('no-transition');
+      }
       page.classList.toggle('active', isActive);
-      page.classList.toggle('hidden', !isActive);
-      if (isActive) {
-        if (!immediate) {
-          page.classList.add('fade-in');
-          setTimeout(() => page.classList.remove('fade-in'), 400);
-        }
+      if (immediate) {
+        requestAnimationFrame(() => page.classList.remove('no-transition'));
       }
     });
 
@@ -204,7 +204,7 @@
 
     state.pages.forEach(rows => {
       const pageEl = document.createElement('div');
-      pageEl.className = 'dashboard-page hidden';
+      pageEl.className = 'dashboard-page';
       pageEl.innerHTML = buildTableHtml(rows);
       state.tableArea.appendChild(pageEl);
     });
@@ -252,6 +252,12 @@
   };
 
   window.addEventListener('resize', () => {
-    window.dashboardPager.updatePages();
+    if (state.resizeTimer) {
+      clearTimeout(state.resizeTimer);
+    }
+    state.resizeTimer = setTimeout(() => {
+      state.resizeTimer = null;
+      window.dashboardPager.updatePages();
+    }, 250);
   });
 })();
