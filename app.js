@@ -157,6 +157,33 @@ function toSafeCount(val) {
   return num;
 }
 
+function formatCardNameWithGroupPosition(card, { includeArchivedSiblings = false } = {}) {
+  if (!card) return '';
+
+  const baseName = card.name || card.id || '';
+  if (!card.groupId) return escapeHtml(baseName);
+
+  const siblings = cards.filter(c => c.groupId === card.groupId && (includeArchivedSiblings || !c.archived));
+  let displayName = baseName;
+  let position = null;
+
+  const nameMatch = /^\s*(\d+)\.\s*(.*)$/.exec(displayName || '');
+  if (nameMatch) {
+    position = toSafeCount(nameMatch[1]);
+    displayName = nameMatch[2] || '';
+  }
+
+  if (!position && siblings.length) {
+    const idx = siblings.findIndex(c => c.id === card.id);
+    position = idx >= 0 ? idx + 1 : null;
+  }
+
+  const total = siblings.length || null;
+  const prefix = position && total ? '<span class="group-position">' + position + '/' + total + '</span> ' : '';
+
+  return prefix + escapeHtml(displayName.trim());
+}
+
 function getCardPlannedQuantity(card) {
   if (!card) return { qty: null, hasValue: false };
   const rawQty = card.quantity !== '' && card.quantity != null
@@ -1135,31 +1162,7 @@ function renderDashboard() {
       .map(o => '<div class="dash-comment-line"><span class="dash-comment-op">' + renderOpLabel(o) + ':</span> ' + escapeHtml(o.comment) + '</div>');
     const commentCell = commentLines.join('');
 
-    const nameCell = (() => {
-      if (!card.groupId) return escapeHtml(card.name);
-
-      const siblings = cards.filter(c => c.groupId === card.groupId && !c.archived);
-      const total = siblings.length || 0;
-      let displayName = card.name || '';
-      let position = null;
-
-      const nameMatch = /^\s*(\d+)\.\s*(.*)$/.exec(displayName || '');
-      if (nameMatch) {
-        position = toSafeCount(nameMatch[1]);
-        displayName = nameMatch[2] || '';
-      }
-
-      if (!position) {
-        const idx = siblings.findIndex(c => c.id === card.id);
-        position = idx >= 0 ? idx + 1 : null;
-      }
-
-      const prefix = position && total
-        ? '<span class="group-marker">(Г)</span><span class="group-position">' + position + '/' + total + '</span> '
-        : '<span class="group-marker">(Г)</span>';
-
-      return prefix + escapeHtml(displayName);
-    })();
+    const nameCell = formatCardNameWithGroupPosition(card);
     return '<tr>' +
       '<td>' + escapeHtml(card.barcode || '') + '</td>' +
       '<td>' + nameCell + '</td>' +
@@ -1267,7 +1270,7 @@ function renderCardsTable() {
           const childFiles = (child.attachments || []).length;
           html += '<tr class="group-child-row" data-parent="' + card.id + '">' +
             '<td><button class="btn-link barcode-link" data-id="' + child.id + '">' + escapeHtml(child.barcode || '') + '</button></td>' +
-            '<td class="group-indent"><span class="group-marker">(Г)</span>' + escapeHtml(child.name) + '</td>' +
+            '<td class="group-indent">' + formatCardNameWithGroupPosition(child) + '</td>' +
             '<td>' + escapeHtml(child.orderNo || '') + '</td>' +
             '<td>' + cardStatusText(child) + '</td>' +
             '<td>' + ((child.operations || []).length) + '</td>' +
@@ -2817,7 +2820,7 @@ function buildWorkorderCardDetails(card, { opened = false, allowArchive = true, 
   const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-card-id="' + card.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
   const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
   const logButton = showLog ? ' <button type="button" class="btn-small btn-secondary log-btn" data-log-card="' + card.id + '">Log</button>' : '';
-  const nameLabel = (card.groupId ? '<span class="group-marker">(Г)</span> ' : '') + escapeHtml(card.name || card.id);
+  const nameLabel = formatCardNameWithGroupPosition(card);
 
   let html = '<details class="wo-card" data-card-id="' + card.id + '"' + (opened ? ' open' : '') + '>' +
     '<summary>' +
@@ -3627,7 +3630,7 @@ function buildArchiveCardDetails(card, { opened = false } = {}) {
   const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
   const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
   const logButton = ' <button type="button" class="btn-small btn-secondary log-btn" data-log-card="' + card.id + '">Log</button>';
-  const nameLabel = (card.groupId ? '<span class="group-marker">(Г)</span> ' : '') + escapeHtml(card.name || card.id);
+  const nameLabel = formatCardNameWithGroupPosition(card, { includeArchivedSiblings: true });
 
   let html = '<details class="wo-card" data-card-id="' + card.id + '"' + (opened ? ' open' : '') + '>' +
     '<summary>' +
