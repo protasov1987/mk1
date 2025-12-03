@@ -157,6 +157,31 @@ function toSafeCount(val) {
   return num;
 }
 
+function getCardPlannedQuantity(card) {
+  if (!card) return { qty: null, hasValue: false };
+  const rawQty = card.quantity !== '' && card.quantity != null
+    ? card.quantity
+    : (card.initialSnapshot && card.initialSnapshot.quantity);
+
+  if (rawQty !== '' && rawQty != null) {
+    return { qty: toSafeCount(rawQty), hasValue: true };
+  }
+
+  const snapshotItems = Array.isArray(card.initialSnapshot && card.initialSnapshot.items)
+    ? card.initialSnapshot.items.length
+    : null;
+  if (snapshotItems) {
+    return { qty: snapshotItems, hasValue: true };
+  }
+
+  const itemsCount = Array.isArray(card.items) ? card.items.length : null;
+  if (itemsCount) {
+    return { qty: itemsCount, hasValue: true };
+  }
+
+  return { qty: null, hasValue: false };
+}
+
 function formatStepCode(step) {
   return String(step * 5).padStart(3, '0');
 }
@@ -1114,17 +1139,17 @@ function renderDashboard() {
       }
     }
 
-    const qtyTotal = toSafeCount(card.quantity != null ? card.quantity : (card.initialSnapshot && card.initialSnapshot.quantity));
+    const { qty: qtyTotal, hasValue: hasQty } = getCardPlannedQuantity(card);
     let qtyCell = '—';
 
-    if (card.status === 'DONE') {
-      const batchResult = calculateFinalResults(opsArr, qtyTotal);
-      const qtyText = qtyTotal > 0 ? (batchResult.good_final + ' из ' + qtyTotal) : '—';
-      qtyCell = qtyTotal > 0 ? '<div class="dash-qty-line">' + qtyText + '</div>' : '—';
-    } else if (opsForDisplay.length) {
+    if (card.status === 'DONE' && hasQty) {
+      const batchResult = calculateFinalResults(opsArr, qtyTotal || 0);
+      const qtyText = (batchResult.good_final || 0) + ' из ' + qtyTotal;
+      qtyCell = '<div class="dash-qty-line">' + qtyText + '</div>';
+    } else if (opsForDisplay.length && hasQty) {
       const qtyLines = opsForDisplay.map(op => {
         const good = toSafeCount(op.goodCount || 0);
-        const qtyText = qtyTotal > 0 ? (good + ' из ' + qtyTotal) : '—';
+        const qtyText = good + ' из ' + qtyTotal;
         return '<div class="dash-qty-line">' + qtyText + '</div>';
       });
       qtyCell = qtyLines.length ? qtyLines.join('') : '—';
