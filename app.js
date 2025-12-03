@@ -182,6 +182,51 @@ function sumItemCounts(items = []) {
   }, { good: 0, scrap: 0, hold: 0 });
 }
 
+function calculateFinalResults(operations = [], initialQty = 0) {
+  const total = toSafeCount(initialQty);
+  const opsSorted = Array.isArray(operations)
+    ? operations.filter(Boolean).slice().sort((a, b) => (a.order || 0) - (b.order || 0))
+    : [];
+
+  let remaining = total;
+  let delayed = 0;
+  let scrapTotal = 0;
+
+  opsSorted.forEach(op => {
+    const good = toSafeCount(op && op.goodCount != null ? op.goodCount : 0);
+    const scrap = toSafeCount(op && op.scrapCount != null ? op.scrapCount : 0);
+    const delay = toSafeCount(op && op.holdCount != null ? op.holdCount : 0);
+
+    const scrapFromDelayed = Math.min(delayed, scrap);
+    delayed -= scrapFromDelayed;
+    scrapTotal += scrapFromDelayed;
+
+    const scrapFromRemaining = Math.min(scrap - scrapFromDelayed, remaining);
+    scrapTotal += scrapFromRemaining;
+    remaining -= scrapFromRemaining;
+
+    const goodFromDelayed = Math.min(delayed, good);
+    delayed -= goodFromDelayed;
+
+    const goodFromRemaining = Math.min(good - goodFromDelayed, remaining);
+    remaining -= goodFromRemaining;
+
+    const newDelayed = Math.min(delay, remaining);
+    delayed += newDelayed;
+    remaining -= newDelayed;
+  });
+
+  const goodFinal = remaining;
+  const delayedFinal = delayed;
+
+  return {
+    good_final: goodFinal,
+    scrap_final: scrapTotal,
+    delayed_final: delayedFinal,
+    summary_ok: goodFinal + scrapTotal + delayedFinal === total
+  };
+}
+
 function buildItemsFromTemplate(template = [], qty = 0) {
   const items = [];
   const targetQty = Number.isFinite(qty) ? qty : 0;
@@ -1070,19 +1115,25 @@ function renderDashboard() {
     }
 
     const qtyTotal = toSafeCount(card.quantity);
-    const qtyLines = opsForDisplay.length
-      ? opsForDisplay.map(op => {
+    let qtyCell = '—';
+
+    if (card.status === 'DONE') {
+      const batchResult = calculateFinalResults(opsArr, qtyTotal);
+      const qtyText = qtyTotal > 0 ? (batchResult.good_final + ' из ' + qtyTotal) : '—';
+      qtyCell = qtyTotal > 0 ? '<div class="dash-qty-line">' + qtyText + '</div>' : '—';
+    } else if (opsForDisplay.length) {
+      const qtyLines = opsForDisplay.map(op => {
         const good = toSafeCount(op.goodCount || 0);
         const qtyText = qtyTotal > 0 ? (good + ' из ' + qtyTotal) : '—';
         return '<div class="dash-qty-line">' + qtyText + '</div>';
-      })
-      : [];
+      });
+      qtyCell = qtyLines.length ? qtyLines.join('') : '—';
+    }
 
     const completedCount = opsArr.filter(o => o.status === 'DONE').length;
     const commentLines = opsForDisplay
       .filter(o => o.comment)
       .map(o => '<div class="dash-comment-line"><span class="dash-comment-op">' + renderOpLabel(o) + ':</span> ' + escapeHtml(o.comment) + '</div>');
-    const qtyCell = qtyLines.length ? qtyLines.join('') : '—';
     const commentCell = commentLines.join('');
 
     const nameCell = (card.groupId ? '<span class="group-marker">(Г)</span>' : '') + escapeHtml(card.name);
