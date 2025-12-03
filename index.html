@@ -5,6 +5,7 @@
   <title>Трекер маршрутных карт ТСЗП</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 </head>
   <body>
     <header>
@@ -12,12 +13,18 @@
         <h1>Трекер маршрутных карт ТСЗП</h1>
         <div id="realtime-clock" class="clock-display" aria-live="polite"></div>
       </div>
+      <div class="user-info" id="user-info" aria-live="polite">
+        <span id="current-user-label">Не авторизован</span>
+        <button id="logout-btn" class="btn-secondary" disabled>Выход</button>
+      </div>
       <nav>
         <button class="nav-btn active" data-target="dashboard">Дашборд</button>
         <button class="nav-btn" data-target="cards">Тех. карты</button>
         <button class="nav-btn" data-target="workorders">Трекер</button>
         <button class="nav-btn" data-target="archive">Архив</button>
         <button class="nav-btn" data-target="workspace"><span class="nav-btn-multiline">Рабочее<br>место</span></button>
+        <button class="nav-btn hidden" data-target="users">Пользователи</button>
+        <button class="nav-btn hidden" data-target="access-levels">Уровни доступа</button>
       </nav>
     </header>
 
@@ -162,6 +169,94 @@
         <div id="workspace-results"></div>
       </div>
     </section>
+
+    <!-- Пользователи -->
+    <section id="users">
+      <div class="card">
+        <h2>Пользователи</h2>
+        <div class="flex" style="gap:16px; flex-wrap:wrap;">
+          <div class="flex-col" style="flex:1 1 280px; min-width:260px;">
+            <h3>Создание / редактирование</h3>
+            <form id="user-form" class="flex-col user-form">
+              <input type="hidden" id="user-id" />
+              <label>Имя пользователя
+                <input id="user-name" required />
+              </label>
+              <label>Пароль
+                <input id="user-password" required minlength="6" />
+              </label>
+              <div class="button-row">
+                <button type="button" class="btn-secondary" id="generate-password">Сгенерировать</button>
+                <button type="button" class="btn-secondary" id="print-barcode" disabled>Печать штрихкода</button>
+              </div>
+              <label>Уровень доступа
+                <select id="user-access-level" required></select>
+              </label>
+              <label class="toggle-row">
+                <input type="checkbox" id="user-active" checked />
+                <span>Активен</span>
+              </label>
+              <div class="button-row">
+                <button type="submit" class="btn-primary">Сохранить</button>
+                <button type="button" class="btn-secondary" id="user-form-reset">Сбросить</button>
+                <button type="button" class="btn-danger" id="delete-user" disabled>Удалить</button>
+              </div>
+            </form>
+          </div>
+          <div class="flex-col" style="flex:2 1 320px; min-width:320px;">
+            <h3>Список пользователей</h3>
+            <div id="users-table"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Уровни доступа -->
+    <section id="access-levels">
+      <div class="card">
+        <h2>Уровни доступа</h2>
+        <div class="flex" style="gap:16px; flex-wrap:wrap;">
+          <div class="flex-col" style="flex:1 1 280px; min-width:260px;">
+            <h3>Создание / редактирование</h3>
+            <form id="access-level-form" class="flex-col">
+              <input type="hidden" id="level-id" />
+              <label>Название уровня
+                <input id="level-name" required />
+              </label>
+              <label>Описание
+                <input id="level-desc" />
+              </label>
+              <label>Стартовая вкладка
+                <select id="level-landing">
+                  <option value="dashboard">Дашборд</option>
+                  <option value="cards">Тех. карты</option>
+                  <option value="workorders">Трекер</option>
+                  <option value="workspace">Рабочее место</option>
+                  <option value="archive">Архив</option>
+                </select>
+              </label>
+              <label>Автовыход (мин)
+                <input type="number" min="1" id="level-timeout" value="30" />
+              </label>
+              <label class="toggle-row">
+                <input type="checkbox" id="level-worker" />
+                <span>Рабочий</span>
+              </label>
+              <div class="permissions-grid" id="permissions-grid"></div>
+              <div class="button-row">
+                <button type="submit" class="btn-primary">Сохранить</button>
+                <button type="button" class="btn-secondary" id="level-reset">Сбросить</button>
+                <button type="button" class="btn-danger" id="level-delete" disabled>Удалить</button>
+              </div>
+            </form>
+          </div>
+          <div class="flex-col" style="flex:2 1 320px; min-width:320px;">
+            <h3>Настроенные уровни</h3>
+            <div id="access-levels-table"></div>
+          </div>
+        </div>
+      </div>
+    </section>
     <div id="card-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="card-modal-title">
       <div class="modal-content card-modal-content">
         <div class="modal-header">
@@ -261,6 +356,20 @@
         </div>
       </div>
     </div>
+    <div class="modal hidden" id="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
+      <div class="modal-content auth-modal-content">
+        <h2 id="auth-modal-title">Вход по паролю</h2>
+        <form id="auth-form" class="flex-col">
+          <label for="auth-password">Пароль</label>
+          <input type="password" id="auth-password" required autocomplete="current-password" />
+          <div class="button-row">
+            <button type="submit" class="btn-primary">Войти</button>
+          </div>
+          <div class="form-hint" id="auth-error" aria-live="polite"></div>
+        </form>
+      </div>
+    </div>
+    <datalist id="user-options"></datalist>
   </main>
 
   <footer>
@@ -330,10 +439,10 @@
       </div>
       <div class="modal-body">
         <p class="group-executor-warning">При создании группового исполнителя операции все текущие исполнители операции будут удалены во всех картах группы!</p>
-        <div class="flex-col">
-          <label for="group-executor-input">Групповой исполнитель операции</label>
-          <input id="group-executor-input" />
-        </div>
+          <div class="flex-col">
+            <label for="group-executor-input">Групповой исполнитель операции</label>
+            <select id="group-executor-input"></select>
+          </div>
         <div class="flex-col">
           <label for="group-op-code-input">Код операции</label>
           <input id="group-op-code-input" />
