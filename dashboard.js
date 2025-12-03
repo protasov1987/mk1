@@ -300,9 +300,15 @@
     }, 250);
   }
 
-  window.addEventListener('load', () => {
+  function initDashboardSizing() {
     updatePages();
-  });
+  }
+
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    requestAnimationFrame(initDashboardSizing);
+  } else {
+    window.addEventListener('load', initDashboardSizing);
+  }
 
   window.addEventListener('resize', handleResize);
 })();
