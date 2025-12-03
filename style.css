@@ -206,16 +206,27 @@ section.active {
 }
 
 .dashboard-page {
-  display: none;
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.35s ease-in-out, visibility 0s linear 0.35s;
+}
+
+.dashboard-page table {
+  width: 100%;
 }
 
 .dashboard-page.active {
-  display: block;
-  animation: dash-fade 0.35s ease-in-out;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 0.35s ease-in-out, visibility 0s;
 }
 
-.dashboard-page.fade-in {
-  animation: dash-fade 0.35s ease-in-out;
+.dashboard-page.no-transition {
+  transition: none !important;
 }
 
 .dashboard-dots {

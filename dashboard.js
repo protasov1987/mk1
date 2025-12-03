@@ -13,7 +13,9 @@
     currentPage: 0,
     lastAvailableHeight: null,
     lastKnownWidth: null,
-    emptyMessage: ''
+    emptyMessage: '',
+    resizeTimer: null,
+    lastRenderKey: null
   };
 
   function ensureContainer() {
@@ -44,8 +46,25 @@
     const rect = state.container.getBoundingClientRect();
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
     const dotsHeight = state.dotsContainer ? state.dotsContainer.offsetHeight || 24 : 24;
-    const padding = 24;
-    const available = viewportHeight - rect.top - dotsHeight - padding;
+    const card = state.container.closest('.card');
+    const main = state.container.closest('main');
+    let bottomGap = 32; // запас на случай отсутствия родителей
+
+    if (card) {
+      const styles = window.getComputedStyle(card);
+      const marginBottom = parseFloat(styles.marginBottom) || 0;
+      const paddingBottom = parseFloat(styles.paddingBottom) || 0;
+      bottomGap = marginBottom + paddingBottom + 8;
+    }
+
+    if (main) {
+      const mainStyles = window.getComputedStyle(main);
+      const mainPadding = parseFloat(mainStyles.paddingBottom) || 0;
+      const mainMargin = parseFloat(mainStyles.marginBottom) || 0;
+      bottomGap += mainPadding + mainMargin;
+    }
+
+    const available = viewportHeight - rect.top - dotsHeight - bottomGap;
     if (available > 0) {
       state.lastAvailableHeight = available;
       return available;
@@ -143,13 +162,12 @@
 
     pages.forEach((page, idx) => {
       const isActive = idx === targetIndex;
+      if (immediate) {
+        page.classList.add('no-transition');
+      }
       page.classList.toggle('active', isActive);
-      page.classList.toggle('hidden', !isActive);
-      if (isActive) {
-        if (!immediate) {
-          page.classList.add('fade-in');
-          setTimeout(() => page.classList.remove('fade-in'), 400);
-        }
+      if (immediate) {
+        requestAnimationFrame(() => page.classList.remove('no-transition'));
       }
     });
 
@@ -204,7 +222,7 @@
 
     state.pages.forEach(rows => {
       const pageEl = document.createElement('div');
-      pageEl.className = 'dashboard-page hidden';
+      pageEl.className = 'dashboard-page';
       pageEl.innerHTML = buildTableHtml(rows);
       state.tableArea.appendChild(pageEl);
     });
@@ -222,9 +240,11 @@
     if (availableHeight) {
       state.tableArea.style.maxHeight = availableHeight + 'px';
       state.tableArea.style.minHeight = availableHeight + 'px';
+      state.tableArea.style.height = availableHeight + 'px';
     } else {
       state.tableArea.style.maxHeight = '';
       state.tableArea.style.minHeight = '';
+      state.tableArea.style.height = '';
     }
 
     state.pages = paginateRows(state.rowsHtml);
@@ -239,9 +259,28 @@
 
   function render(payload) {
     if (!payload) return;
-    state.headerHtml = payload.headerHtml || '';
-    state.rowsHtml = Array.isArray(payload.rowsHtml) ? payload.rowsHtml : [];
-    state.emptyMessage = payload.emptyMessage || '';
+    const incomingRows = Array.isArray(payload.rowsHtml) ? payload.rowsHtml : [];
+    const header = payload.headerHtml || '';
+    const emptyMessage = payload.emptyMessage || '';
+    const renderKey = header + '|' + emptyMessage + '|' + incomingRows.join('');
+
+    const noChanges = state.lastRenderKey && state.lastRenderKey === renderKey;
+
+    state.headerHtml = header;
+    state.rowsHtml = incomingRows;
+    state.emptyMessage = emptyMessage;
+    state.lastRenderKey = renderKey;
+
+    if (noChanges && state.container) {
+      const availableHeight = getAvailableHeight();
+      if (availableHeight) {
+        state.tableArea.style.maxHeight = availableHeight + 'px';
+        state.tableArea.style.minHeight = availableHeight + 'px';
+        state.tableArea.style.height = availableHeight + 'px';
+      }
+      return;
+    }
+
     updatePages();
   }
 
@@ -251,7 +290,25 @@
     stopRotation
   };
 
-  window.addEventListener('resize', () => {
-    window.dashboardPager.updatePages();
-  });
+  function handleResize() {
+    if (state.resizeTimer) {
+      clearTimeout(state.resizeTimer);
+    }
+    state.resizeTimer = setTimeout(() => {
+      state.resizeTimer = null;
+      updatePages();
+    }, 250);
+  }
+
+  function initDashboardSizing() {
+    updatePages();
+  }
+
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    requestAnimationFrame(initDashboardSizing);
+  } else {
+    window.addEventListener('load', initDashboardSizing);
+  }
+
+  window.addEventListener('resize', handleResize);
 })();
