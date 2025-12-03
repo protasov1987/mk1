@@ -290,13 +290,19 @@
     stopRotation
   };
 
-  window.addEventListener('resize', () => {
+  function handleResize() {
     if (state.resizeTimer) {
       clearTimeout(state.resizeTimer);
     }
     state.resizeTimer = setTimeout(() => {
       state.resizeTimer = null;
-      window.dashboardPager.updatePages();
+      updatePages();
     }, 250);
+  }
+
+  window.addEventListener('load', () => {
+    updatePages();
   });
+
+  window.addEventListener('resize', handleResize);
 })();
