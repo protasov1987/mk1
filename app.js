@@ -3761,6 +3761,8 @@ function setupNavigation() {
         renderWorkordersTable({ collapseAll: true });
       } else if (target === 'archive') {
         renderArchiveTable();
+      } else if (target === 'dashboard' && window.dashboardPager && typeof window.dashboardPager.updatePages === 'function') {
+        requestAnimationFrame(() => window.dashboardPager.updatePages());
       }
     });
   });
@@ -4182,17 +4184,20 @@ function setupAttachmentControls() {
 }
 
 // === ИНИЦИАЛИЗАЦИЯ ===
-document.addEventListener('DOMContentLoaded', async () => {
-  startRealtimeClock();
-  await loadData();
-  setupNavigation();
+  document.addEventListener('DOMContentLoaded', async () => {
+    startRealtimeClock();
+    await loadData();
+    setupNavigation();
   setupCardsTabs();
   setupForms();
   setupBarcodeModal();
   setupGroupTransferModal();
   setupGroupExecutorModal();
-  setupAttachmentControls();
-  setupLogModal();
-  renderEverything();
-  setInterval(tickTimers, 1000);
-});
+    setupAttachmentControls();
+    setupLogModal();
+    renderEverything();
+    if (window.dashboardPager && typeof window.dashboardPager.updatePages === 'function') {
+      requestAnimationFrame(() => window.dashboardPager.updatePages());
+    }
+    setInterval(tickTimers, 1000);
+  });
