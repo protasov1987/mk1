@@ -1567,6 +1567,18 @@ footer {
   background: #dc2626;
 }
 
+/* Readonly tab helpers */
+.tab-readonly .view-disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.tab-readonly input.view-disabled,
+.tab-readonly select.view-disabled,
+.tab-readonly textarea.view-disabled {
+  background-color: #f3f4f6;
+}
+
 @media (max-width: 768px) {
   header {
     flex-direction: column;

@@ -254,6 +254,29 @@ function canEditTab(tabKey) {
   return tab ? !!tab.edit : false;
 }
 
+function isTabReadonly(tabKey) {
+  return canViewTab(tabKey) && !canEditTab(tabKey);
+}
+
+function applyReadonlyState(tabKey, sectionId) {
+  const section = document.getElementById(sectionId);
+  if (!section) return;
+  const readonly = isTabReadonly(tabKey);
+  section.classList.toggle('tab-readonly', readonly);
+
+  const controls = section.querySelectorAll('input, select, textarea, button');
+  controls.forEach(ctrl => {
+    const allowView = ctrl.dataset.allowView === 'true';
+    if (readonly && !allowView) {
+      ctrl.disabled = true;
+      ctrl.classList.add('view-disabled');
+    } else {
+      ctrl.disabled = false;
+      ctrl.classList.remove('view-disabled');
+    }
+  });
+}
+
 function cloneCard(card) {
   return JSON.parse(JSON.stringify(card));
 }
@@ -1354,6 +1377,16 @@ function applyNavigationPermissions() {
   activateTab(selected);
 }
 
+function syncReadonlyLocks() {
+  applyReadonlyState('dashboard', 'dashboard');
+  applyReadonlyState('cards', 'cards');
+  applyReadonlyState('workorders', 'workorders');
+  applyReadonlyState('archive', 'archive');
+  applyReadonlyState('workspace', 'workspace');
+  applyReadonlyState('users', 'users');
+  applyReadonlyState('accessLevels', 'access-levels');
+}
+
 function setupAuthControls() {
   const loginOverlay = document.getElementById('login-overlay');
   const appRoot = document.getElementById('app-root');
@@ -1768,6 +1801,8 @@ function renderCardsTable() {
       openAttachmentsModal(btn.getAttribute('data-attach-card'), 'live');
     });
   });
+
+  applyReadonlyState('cards', 'cards');
 }
 
 function buildCardCopy(template, { nameOverride, groupId = null } = {}) {
@@ -3198,17 +3233,17 @@ function cardSearchScoreWithChildren(card, term, { includeArchivedChildren = fal
   return Math.max(selfScore, childScore);
 }
 
-function buildWorkorderCardDetails(card, { opened = false, allowArchive = true, showLog = true } = {}) {
+function buildWorkorderCardDetails(card, { opened = false, allowArchive = true, showLog = true, readonly = false } = {}) {
   const stateBadge = renderCardStateBadge(card);
   const missingBadge = cardHasMissingExecutors(card)
     ? '<span class="status-pill status-pill-missing-executor" title="Есть операции без исполнителя">Нет исполнителя</span>'
     : '';
-  const canArchive = allowArchive && card.status === 'DONE';
+  const canArchive = allowArchive && card.status === 'DONE' && !readonly;
   const filesCount = (card.attachments || []).length;
   const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
-  const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-card-id="' + card.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
-  const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
-  const logButton = showLog ? ' <button type="button" class="btn-small btn-secondary log-btn" data-log-card="' + card.id + '">Log</button>' : '';
+  const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-allow-view="true" data-card-id="' + card.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
+  const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-card-id="' + card.id + '" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
+  const logButton = showLog ? ' <button type="button" class="btn-small btn-secondary log-btn" data-allow-view="true" data-log-card="' + card.id + '">Log</button>' : '';
   const nameLabel = formatCardNameWithGroupPosition(card);
 
   let html = '<details class="wo-card" data-card-id="' + card.id + '"' + (opened ? ' open' : '') + '>' +
@@ -3229,16 +3264,16 @@ function buildWorkorderCardDetails(card, { opened = false, allowArchive = true, 
     '</summary>';
 
   html += buildCardInfoBlock(card);
-  html += buildOperationsTable(card, { readonly: false, showQuantityColumn: false });
+  html += buildOperationsTable(card, { readonly, showQuantityColumn: false, allowActions: !readonly });
   html += '</details>';
   return html;
 }
 
-function buildWorkspaceCardDetails(card, { opened = true } = {}) {
+function buildWorkspaceCardDetails(card, { opened = true, readonly = false } = {}) {
   const stateBadge = renderCardStateBadge(card);
   const filesCount = (card.attachments || []).length;
   const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
-  const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-card-id="' + card.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
+  const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-allow-view="true" data-card-id="' + card.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
   const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
   const nameLabel = formatCardNameWithGroupPosition(card);
 
@@ -3258,7 +3293,7 @@ function buildWorkspaceCardDetails(card, { opened = true } = {}) {
 
   html += buildCardInfoBlock(card);
   const restrictToUser = currentUser && currentUser.permissions && currentUser.permissions.worker;
-  html += buildOperationsTable(card, { readonly: false, showQuantityColumn: false, lockExecutors: true, lockQuantities: true, restrictToUser });
+  html += buildOperationsTable(card, { readonly, showQuantityColumn: false, lockExecutors: true, lockQuantities: true, allowActions: !readonly, restrictToUser });
   html += '</details>';
   return html;
 }
@@ -3673,6 +3708,7 @@ function applyOperationAction(action, card, op, { anchorGroupId = null, useWorko
 
 function renderWorkordersTable({ collapseAll = false } = {}) {
   const wrapper = document.getElementById('workorders-table-wrapper');
+  const readonly = isTabReadonly('workorders');
   const rootCards = cards.filter(c => !c.archived && !c.groupId);
   const hasOperations = rootCards.some(card => {
     if (isGroupCard(card)) {
@@ -3729,13 +3765,13 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       const missingBadge = groupHasMissingExecutors(card)
         ? '<span class="status-pill status-pill-missing-executor" title="Есть операции без исполнителя">Нет исполнителя</span>'
         : '';
-      const groupExecutorBtn = '<button type="button" class="btn-small group-executor-btn" data-group-id="' + card.id + '"><span class="group-executor-label">Групповой<br>исполнитель</span></button>';
+      const groupExecutorBtn = readonly ? '' : '<button type="button" class="btn-small group-executor-btn" data-group-id="' + card.id + '"><span class="group-executor-label">Групповой<br>исполнитель</span></button>';
       const filesCount = (card.attachments || []).length;
       const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
       const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-card-id="' + card.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
-      const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
+      const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-card-id="' + card.id + '" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
       const childrenHtml = children.length
-        ? children.map(child => buildWorkorderCardDetails(child, { opened: !collapseAll && workorderOpenCards.has(child.id), allowArchive: false })).join('')
+        ? children.map(child => buildWorkorderCardDetails(child, { opened: !collapseAll && workorderOpenCards.has(child.id), allowArchive: false, readonly })).join('')
         : '<p class="group-empty">В группе нет карт для отображения.</p>';
 
       html += '<details class="wo-card group-wo-card" data-group-id="' + card.id + '"' + (opened ? ' open' : '') + '>' +
@@ -3750,7 +3786,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
         '</div>' +
         '<div class="summary-actions">' +
         groupExecutorBtn + ' ' + (missingBadge ? missingBadge + ' ' : '') + stateBadge +
-        (card.status === 'DONE' ? ' <button type="button" class="btn-small btn-secondary archive-group-btn" data-group-id="' + card.id + '">Перенести в архив</button>' : '') +
+        (!readonly && card.status === 'DONE' ? ' <button type="button" class="btn-small btn-secondary archive-group-btn" data-group-id="' + card.id + '">Перенести в архив</button>' : '') +
         '</div>' +
         '</div>' +
         '</summary>' +
@@ -3758,7 +3794,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
         '</details>';
     } else if (card.operations && card.operations.length) {
       const opened = !collapseAll && workorderOpenCards.has(card.id);
-      html += buildWorkorderCardDetails(card, { opened });
+      html += buildWorkorderCardDetails(card, { opened, readonly });
     }
   });
 
@@ -4069,6 +4105,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
 
   wrapper.querySelectorAll('button[data-action]').forEach(btn => {
     btn.addEventListener('click', () => {
+      if (readonly) return;
       const action = btn.getAttribute('data-action');
       const cardId = btn.getAttribute('data-card-id');
       const opId = btn.getAttribute('data-op-id');
@@ -4085,11 +4122,14 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       applyOperationAction(action, card, op, { anchorGroupId });
     });
   });
+
+  applyReadonlyState('workorders', 'workorders');
 }
 
 function renderWorkspaceView() {
   const wrapper = document.getElementById('workspace-results');
   if (!wrapper) return;
+  const readonly = isTabReadonly('workspace');
 
   const termRaw = workspaceSearchTerm.trim();
   const digitsOnly = termRaw.replace(/\D/g, '');
@@ -4123,7 +4163,7 @@ function renderWorkspaceView() {
   let html = '';
   candidates.forEach(card => {
     if (card.operations && card.operations.length) {
-      html += buildWorkspaceCardDetails(card);
+      html += buildWorkspaceCardDetails(card, { readonly });
     }
   });
 
@@ -4158,6 +4198,7 @@ function renderWorkspaceView() {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (readonly) return;
       const action = btn.getAttribute('data-action');
       const cardId = btn.getAttribute('data-card-id');
       const opId = btn.getAttribute('data-op-id');
@@ -4172,6 +4213,8 @@ function renderWorkspaceView() {
       }
     });
   });
+
+  applyReadonlyState('workspace', 'workspace');
 }
 
 function getWorkspaceModalInputs() {
@@ -4469,6 +4512,8 @@ function renderArchiveTable() {
       renderEverything();
     });
   });
+
+  applyReadonlyState('archive', 'archive');
 }
 
 // === ТАЙМЕР ===
@@ -4956,6 +5001,7 @@ function renderEverything() {
   renderWorkspaceView();
   renderUsersTable();
   renderAccessLevelsTable();
+  syncReadonlyLocks();
 }
 
 function setupGroupTransferModal() {
@@ -5049,11 +5095,13 @@ function setupWorkspaceModal() {
 // === ПОЛЬЗОВАТЕЛИ И УРОВНИ ДОСТУПА ===
 function renderUsersTable() {
   const container = document.getElementById('users-table');
+  const createBtn = document.getElementById('user-create');
   if (!container) return;
   if (!canViewTab('users')) {
     container.innerHTML = '<p>Нет прав для просмотра пользователей.</p>';
     return;
   }
+  if (createBtn) createBtn.disabled = !canEditTab('users');
   renderUserDatalist();
   let rows = '';
   users.forEach(u => {
@@ -5090,11 +5138,13 @@ function renderUsersTable() {
 
 function renderAccessLevelsTable() {
   const container = document.getElementById('access-levels-table');
+  const createBtn = document.getElementById('access-level-create');
   if (!container) return;
   if (!canViewTab('accessLevels')) {
     container.innerHTML = '<p>Нет прав для просмотра уровней доступа.</p>';
     return;
   }
+  if (createBtn) createBtn.disabled = !canEditTab('accessLevels');
   let rows = '';
   accessLevels.forEach(level => {
     const perms = level.permissions || {};
