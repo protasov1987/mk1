@@ -858,6 +858,7 @@ async function handleApi(req, res) {
       const saved = await database.update(current => {
         const normalized = normalizeData(parsed);
         normalized.users = current.users || [];
+        normalized.accessLevels = current.accessLevels || [];
         return mergeSnapshots(current, normalized);
       });
       sendJson(res, 200, { status: 'ok', data: saved });
