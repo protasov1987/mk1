@@ -20,6 +20,13 @@ header {
   flex-wrap: wrap;
 }
 
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
 .header-left {
   display: flex;
   flex-direction: column;
@@ -254,6 +261,18 @@ nav {
 .workspace-stop-action-btn {
   padding: 14px 20px;
   font-size: 16px;
+}
+
+body.unauth header,
+body.unauth main,
+body.unauth footer,
+body.unauth nav,
+body.unauth #server-status {
+  display: none;
+}
+
+body.unauth #auth-modal {
+  display: flex;
 }
 
 .hidden {
@@ -810,6 +829,48 @@ tbody tr:nth-child(even) {
 
 .info-modal-content .modal-body {
   font-size: 16px;
+}
+
+.auth-modal-content {
+  max-width: 360px;
+  width: min(90vw, 360px);
+}
+
+.form-hint {
+  color: #b91c1c;
+  min-height: 18px;
+  font-size: 13px;
+}
+
+.user-form .button-row {
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.permissions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+  border: 1px solid #e5e7eb;
+  padding: 8px;
+  border-radius: 8px;
+}
+
+.permissions-grid .perm-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px;
+  background: #f9fafb;
+}
+
+.permissions-grid h4 {
+  margin: 0 0 6px;
+}
+
+.button-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .group-executor-modal-content {
