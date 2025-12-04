@@ -1384,7 +1384,7 @@ function syncReadonlyLocks() {
   applyReadonlyState('archive', 'archive');
   applyReadonlyState('workspace', 'workspace');
   applyReadonlyState('users', 'users');
-  applyReadonlyState('accessLevels', 'access-levels');
+  applyReadonlyState('accessLevels', 'accessLevels');
 }
 
 function setupAuthControls() {
