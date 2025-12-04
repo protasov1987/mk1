@@ -18,6 +18,22 @@ const SESSION_COOKIE = 'session';
 const sessions = new Map();
 const PUBLIC_API_PATHS = new Set(['/api/login', '/api/logout', '/api/session']);
 
+const DEFAULT_PERMISSIONS = {
+  tabs: {
+    dashboard: { view: true, edit: true },
+    cards: { view: true, edit: true },
+    workorders: { view: true, edit: true },
+    archive: { view: true, edit: true },
+    workspace: { view: true, edit: true },
+    users: { view: true, edit: true },
+    accessLevels: { view: true, edit: true }
+  },
+  attachments: { upload: true, remove: true },
+  landingTab: 'dashboard',
+  inactivityTimeoutMinutes: 30,
+  worker: false
+};
+
 function genId(prefix) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`;
 }
@@ -96,6 +112,30 @@ function generateUniqueOpCode(used = new Set()) {
   return code;
 }
 
+function clonePermissions(source = {}) {
+  const tabs = source.tabs || {};
+  const safeTabs = Object.fromEntries(
+    Object.entries(DEFAULT_PERMISSIONS.tabs).map(([key, defaults]) => {
+      const incoming = tabs[key] || {};
+      return [key, { view: Boolean(incoming.view ?? defaults.view), edit: Boolean(incoming.edit ?? defaults.edit) }];
+    })
+  );
+
+  const attachments = source.attachments || {};
+  return {
+    tabs: safeTabs,
+    attachments: {
+      upload: Boolean(attachments.upload ?? DEFAULT_PERMISSIONS.attachments.upload),
+      remove: Boolean(attachments.remove ?? DEFAULT_PERMISSIONS.attachments.remove)
+    },
+    landingTab: source.landingTab || DEFAULT_PERMISSIONS.landingTab,
+    inactivityTimeoutMinutes: Number.isFinite(source.inactivityTimeoutMinutes)
+      ? Math.max(1, parseInt(source.inactivityTimeoutMinutes, 10))
+      : DEFAULT_PERMISSIONS.inactivityTimeoutMinutes,
+    worker: Boolean(source.worker)
+  };
+}
+
 function createRouteOpFromRefs(op, center, executor, plannedMinutes, order, options = {}) {
   const { quantity = '', autoCode = false, code } = options;
   return {
@@ -129,7 +169,18 @@ function createRouteOpFromRefs(op, center, executor, plannedMinutes, order, opti
 
 function buildDefaultUser() {
   const { hash, salt } = hashPassword(DEFAULT_ADMIN_PASSWORD);
-  return { id: genId('user'), ...DEFAULT_ADMIN, passwordHash: hash, passwordSalt: salt };
+  return { id: genId('user'), ...DEFAULT_ADMIN, passwordHash: hash, passwordSalt: salt, accessLevelId: 'level_admin', status: 'active' };
+}
+
+function buildDefaultAccessLevels() {
+  return [
+    {
+      id: 'level_admin',
+      name: 'Администратор',
+      description: 'Полные права',
+      permissions: clonePermissions({ ...DEFAULT_PERMISSIONS, worker: false, landingTab: 'dashboard', inactivityTimeoutMinutes: 60 })
+    }
+  ];
 }
 
 function buildDefaultData() {
@@ -169,8 +220,9 @@ function buildDefaultData() {
   ];
 
   const users = [buildDefaultUser()];
+  const accessLevels = buildDefaultAccessLevels();
 
-  return { cards, ops, centers, users };
+  return { cards, ops, centers, users, accessLevels };
 }
 
 function sendJson(res, statusCode, data) {
@@ -354,7 +406,15 @@ function normalizeData(payload) {
     cards: Array.isArray(payload.cards) ? payload.cards.map(normalizeCard) : [],
     ops: Array.isArray(payload.ops) ? payload.ops : [],
     centers: Array.isArray(payload.centers) ? payload.centers : [],
-    users: Array.isArray(payload.users) ? payload.users : []
+    users: Array.isArray(payload.users) ? payload.users : [],
+    accessLevels: Array.isArray(payload.accessLevels)
+      ? payload.accessLevels.map(level => ({
+        id: level.id || genId('lvl'),
+        name: level.name || 'Уровень доступа',
+        description: level.description || '',
+        permissions: clonePermissions(level.permissions || {})
+      }))
+      : []
   };
   ensureOperationCodes(safe);
   safe.cards = safe.cards.map(card => {
@@ -391,6 +451,61 @@ function mergeSnapshots(existingData, incomingData) {
   return { ...incomingData, cards: mergedCards };
 }
 
+function isPasswordValid(password) {
+  return typeof password === 'string' && password.length >= 6 && /[A-Za-zА-Яа-яЁё]/.test(password) && /\d/.test(password);
+}
+
+function isPasswordUnique(password, users, excludeId = null) {
+  return !(users || []).some(u => {
+    if (excludeId && u.id === excludeId) return false;
+    return verifyPassword(password, u);
+  });
+}
+
+function getAccessLevelForUser(user, accessLevels = []) {
+  if (!user) return null;
+  if ((user.name || user.username) === DEFAULT_ADMIN.name) {
+    return accessLevels.find(l => l.id === 'level_admin') || { id: 'level_admin', name: 'Администратор', permissions: clonePermissions(DEFAULT_PERMISSIONS) };
+  }
+  return accessLevels.find(level => level.id === user.accessLevelId) || null;
+}
+
+function hasFullAccess(user) {
+  return user && ((user.name || user.username) === DEFAULT_ADMIN.name || user.role === 'admin');
+}
+
+function getUserPermissions(user, accessLevels = []) {
+  const level = getAccessLevelForUser(user, accessLevels);
+  return level ? clonePermissions(level.permissions || {}) : clonePermissions(DEFAULT_PERMISSIONS);
+}
+
+function canManageUsers(user, accessLevels = []) {
+  if (hasFullAccess(user)) return true;
+  const perms = getUserPermissions(user, accessLevels);
+  return Boolean(perms.tabs?.users?.edit);
+}
+
+function canManageAccessLevels(user, accessLevels = []) {
+  if (hasFullAccess(user)) return true;
+  const perms = getUserPermissions(user, accessLevels);
+  return Boolean(perms.tabs?.accessLevels?.edit);
+}
+
+function canViewTab(user, accessLevels = [], tabKey = '') {
+  const perms = getUserPermissions(user, accessLevels);
+  const tab = perms.tabs?.[tabKey];
+  return Boolean(tab && tab.view);
+}
+
+function sanitizeUser(user, level) {
+  const safe = { ...user };
+  delete safe.password;
+  delete safe.passwordHash;
+  delete safe.passwordSalt;
+  safe.permissions = level ? clonePermissions(level.permissions || {}) : clonePermissions(DEFAULT_PERMISSIONS);
+  return safe;
+}
+
 const database = new JsonDatabase(DATA_FILE);
 
 function parseCookies(cookieHeader = '') {
@@ -413,6 +528,14 @@ async function resolveUserBySession(req) {
     sessions.delete(token);
     return null;
   }
+  const level = getAccessLevelForUser(user, data.accessLevels || []);
+  const timeoutMinutes = level?.permissions?.inactivityTimeoutMinutes || DEFAULT_PERMISSIONS.inactivityTimeoutMinutes;
+  const timeoutMs = Math.max(1, timeoutMinutes) * 60 * 1000;
+  if (session.lastActive && Date.now() - session.lastActive > timeoutMs) {
+    sessions.delete(token);
+    return null;
+  }
+  session.lastActive = Date.now();
   return user;
 }
 
@@ -429,6 +552,9 @@ async function ensureAuthenticated(req, res) {
 async function ensureDefaultUser() {
   await database.update(data => {
     const draft = { ...deepClone(data) };
+    draft.accessLevels = Array.isArray(draft.accessLevels) && draft.accessLevels.length
+      ? draft.accessLevels.map(level => ({ ...level, permissions: clonePermissions(level.permissions || {}) }))
+      : buildDefaultAccessLevels();
     draft.users = Array.isArray(draft.users) ? draft.users.map(user => {
       const next = { ...user };
       const isAbyss = (next.name || next.username) === DEFAULT_ADMIN.name;
@@ -442,6 +568,9 @@ async function ensureDefaultUser() {
       if (isAbyss && !next.role) {
         next.role = DEFAULT_ADMIN.role;
       }
+      if (!next.accessLevelId) {
+        next.accessLevelId = 'level_admin';
+      }
       return next;
     }) : [];
 
@@ -450,6 +579,188 @@ async function ensureDefaultUser() {
     }
     return draft;
   });
+}
+
+function parseJsonBody(raw) {
+  try {
+    return JSON.parse(raw || '{}');
+  } catch (err) {
+    return null;
+  }
+}
+
+async function handleSecurityRoutes(req, res) {
+  const parsed = url.parse(req.url, true);
+  if (!parsed.pathname.startsWith('/api/security/')) return false;
+
+  const authedUser = await ensureAuthenticated(req, res);
+  if (!authedUser) return true;
+  const data = await database.getData();
+  const accessLevels = data.accessLevels || [];
+
+  if (parsed.pathname === '/api/security/users' && req.method === 'GET') {
+    if (!canViewTab(authedUser, accessLevels, 'users')) {
+      sendJson(res, 403, { error: 'Нет прав' });
+      return true;
+    }
+    const sanitized = (data.users || []).map(u => sanitizeUser(u, getAccessLevelForUser(u, accessLevels)));
+    sendJson(res, 200, { users: sanitized });
+    return true;
+  }
+
+  if (parsed.pathname === '/api/security/users' && req.method === 'POST') {
+    if (!canManageUsers(authedUser, accessLevels)) {
+      sendJson(res, 403, { error: 'Нет прав' });
+      return true;
+    }
+    const raw = await parseBody(req).catch(() => '');
+    const payload = parseJsonBody(raw);
+    if (!payload) {
+      sendJson(res, 400, { error: 'Некорректные данные' });
+      return true;
+    }
+    const { name, password, accessLevelId, status } = payload;
+    const username = (name || '').trim();
+    if (!username) {
+      sendJson(res, 400, { error: 'Имя обязательно' });
+      return true;
+    }
+    if (!isPasswordValid(password)) {
+      sendJson(res, 400, { error: 'Пароль должен быть не короче 6 символов и содержать буквы и цифры' });
+      return true;
+    }
+    if (!isPasswordUnique(password, data.users || [])) {
+      sendJson(res, 400, { error: 'Пароль уже используется другим пользователем' });
+      return true;
+    }
+    if (!accessLevels.find(l => l.id === accessLevelId)) {
+      sendJson(res, 400, { error: 'Уровень доступа не найден' });
+      return true;
+    }
+    const { hash, salt } = hashPassword(password);
+    const saved = await database.update(current => {
+      const draft = normalizeData(current);
+      draft.users = Array.isArray(draft.users) ? draft.users : [];
+      draft.users.push({
+        id: genId('user'),
+        name: username,
+        passwordHash: hash,
+        passwordSalt: salt,
+        accessLevelId,
+        status: status || 'active'
+      });
+      return draft;
+    });
+    const updated = (saved.users || []).map(u => sanitizeUser(u, getAccessLevelForUser(u, saved.accessLevels || [])));
+    sendJson(res, 200, { users: updated });
+    return true;
+  }
+
+  if (parsed.pathname.startsWith('/api/security/users/') && req.method === 'PUT') {
+    if (!canManageUsers(authedUser, accessLevels)) {
+      sendJson(res, 403, { error: 'Нет прав' });
+      return true;
+    }
+    const userId = parsed.pathname.split('/').pop();
+    const raw = await parseBody(req).catch(() => '');
+    const payload = parseJsonBody(raw);
+    if (!payload) {
+      sendJson(res, 400, { error: 'Некорректные данные' });
+      return true;
+    }
+    const { name, password, accessLevelId, status } = payload;
+    const saved = await database.update(current => {
+      const draft = normalizeData(current);
+      const target = (draft.users || []).find(u => u.id === userId);
+      if (!target) {
+        throw new Error('Пользователь не найден');
+      }
+      if (name) target.name = name.trim();
+      if (status) target.status = status;
+      if (accessLevelId && accessLevels.find(l => l.id === accessLevelId)) {
+        target.accessLevelId = accessLevelId;
+      }
+      if (password) {
+        if (!isPasswordValid(password)) {
+          throw new Error('Пароль должен быть не короче 6 символов и содержать буквы и цифры');
+        }
+        if (!isPasswordUnique(password, draft.users, userId)) {
+          throw new Error('Пароль уже используется другим пользователем');
+        }
+        const { hash, salt } = hashPassword(password);
+        target.passwordHash = hash;
+        target.passwordSalt = salt;
+      }
+      return draft;
+    }).catch(err => ({ error: err.message }));
+
+    if (saved.error) {
+      sendJson(res, 400, { error: saved.error });
+      return true;
+    }
+    const updated = (saved.users || []).map(u => sanitizeUser(u, getAccessLevelForUser(u, saved.accessLevels || [])));
+    sendJson(res, 200, { users: updated });
+    return true;
+  }
+
+  if (parsed.pathname.startsWith('/api/security/users/') && req.method === 'DELETE') {
+    if (!canManageUsers(authedUser, accessLevels)) {
+      sendJson(res, 403, { error: 'Нет прав' });
+      return true;
+    }
+    const userId = parsed.pathname.split('/').pop();
+    await database.update(current => {
+      const draft = normalizeData(current);
+      draft.users = (draft.users || []).filter(u => u.id !== userId || (u.name || u.username) === DEFAULT_ADMIN.name);
+      return draft;
+    });
+    const fresh = await database.getData();
+    const updated = (fresh.users || []).map(u => sanitizeUser(u, getAccessLevelForUser(u, fresh.accessLevels || [])));
+    sendJson(res, 200, { users: updated });
+    return true;
+  }
+
+  if (parsed.pathname === '/api/security/access-levels' && req.method === 'GET') {
+    if (!canViewTab(authedUser, accessLevels, 'accessLevels')) {
+      sendJson(res, 403, { error: 'Нет прав' });
+      return true;
+    }
+    sendJson(res, 200, { accessLevels });
+    return true;
+  }
+
+  if (parsed.pathname === '/api/security/access-levels' && req.method === 'POST') {
+    if (!canManageAccessLevels(authedUser, accessLevels)) {
+      sendJson(res, 403, { error: 'Нет прав' });
+      return true;
+    }
+    const raw = await parseBody(req).catch(() => '');
+    const payload = parseJsonBody(raw);
+    if (!payload) {
+      sendJson(res, 400, { error: 'Некорректные данные' });
+      return true;
+    }
+    const { id, name, description, permissions } = payload;
+    if (!name) {
+      sendJson(res, 400, { error: 'Название обязательно' });
+      return true;
+    }
+    const saved = await database.update(current => {
+      const draft = normalizeData(current);
+      const nextLevel = { id: id || genId('lvl'), name: name.trim(), description: description || '', permissions: clonePermissions(permissions || {}) };
+      const existingIdx = (draft.accessLevels || []).findIndex(l => l.id === nextLevel.id);
+      if (existingIdx >= 0) {
+        draft.accessLevels[existingIdx] = nextLevel;
+      } else {
+        draft.accessLevels.push(nextLevel);
+      }
+      return draft;
+    });
+    sendJson(res, 200, { accessLevels: saved.accessLevels || [] });
+    return true;
+  }
+
+  return false;
 }
 
 async function handleAuth(req, res) {
@@ -480,12 +791,14 @@ async function handleAuth(req, res) {
       }
 
       const token = genId('sess');
-      sessions.set(token, { userId: user.id, createdAt: Date.now() });
+      sessions.set(token, { userId: user.id, createdAt: Date.now(), lastActive: Date.now() });
+      const level = getAccessLevelForUser(user, data.accessLevels || []);
+      const safeUser = sanitizeUser(user, level);
       res.writeHead(200, {
         'Set-Cookie': `${SESSION_COOKIE}=${token}; HttpOnly; Path=/; SameSite=Lax`,
         'Content-Type': 'application/json; charset=utf-8'
       });
-      res.end(JSON.stringify({ success: true, user: user.name || user.username || 'Пользователь' }));
+      res.end(JSON.stringify({ success: true, user: safeUser }));
     } catch (err) {
       sendJson(res, 400, { success: false, error: 'Некорректный запрос' });
     }
@@ -512,7 +825,9 @@ async function handleAuth(req, res) {
       sendJson(res, 401, { error: 'Unauthorized' });
       return true;
     }
-    sendJson(res, 200, { user: { name: user.name, role: user.role || 'user' } });
+    const data = await database.getData();
+    const level = getAccessLevelForUser(user, data.accessLevels || []);
+    sendJson(res, 200, { user: sanitizeUser(user, level) });
     return true;
   }
 
@@ -523,6 +838,7 @@ async function handleApi(req, res) {
   const pathname = url.parse(req.url).pathname;
   if (!pathname.startsWith('/api/')) return false;
   if (PUBLIC_API_PATHS.has(pathname)) return false;
+  if (await handleSecurityRoutes(req, res)) return true;
   if (!pathname.startsWith('/api/data')) return false;
 
   const authedUser = await ensureAuthenticated(req, res);
@@ -530,7 +846,8 @@ async function handleApi(req, res) {
 
   if (req.method === 'GET' && pathname.startsWith('/api/data')) {
     const data = await database.getData();
-    sendJson(res, 200, data);
+    const safe = { ...data, users: (data.users || []).map(u => sanitizeUser(u, getAccessLevelForUser(u, data.accessLevels || []))) };
+    sendJson(res, 200, safe);
     return true;
   }
 
