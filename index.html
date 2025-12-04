@@ -7,11 +7,24 @@
   <link rel="stylesheet" href="style.css" />
 </head>
   <body>
+  <div id="login-overlay" class="auth-overlay">
+    <div id="login-modal" class="auth-modal">
+      <h2>Вход</h2>
+      <form id="login-form">
+        <input type="password" id="login-password" name="password" placeholder="Пароль" required />
+        <button type="submit" id="login-submit">Войти</button>
+        <div id="login-error" style="display:none;"></div>
+      </form>
+    </div>
+  </div>
+
+  <div id="app-root" class="hidden">
     <header>
       <div class="header-left">
         <h1>Трекер маршрутных карт ТСЗП</h1>
         <div id="realtime-clock" class="clock-display" aria-live="polite"></div>
       </div>
+      <div class="user-badge" id="user-badge" aria-live="polite"></div>
       <nav>
         <button class="nav-btn active" data-target="dashboard">Дашборд</button>
         <button class="nav-btn" data-target="cards">Тех. карты</button>
@@ -494,6 +507,8 @@
         <button id="btn-close-barcode" class="btn-secondary">Закрыть</button>
       </div>
     </div>
+  </div>
+
   </div>
 
   <script src="dashboard.js"></script>
