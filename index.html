@@ -28,7 +28,8 @@
         <div class="user-badge" id="user-badge" aria-live="polite"></div>
         <button class="btn-secondary btn-logout" id="btn-logout" type="button">Выход</button>
       </div>
-      <nav>
+      <button class="nav-toggle" id="nav-toggle" aria-label="Открыть меню" aria-expanded="false">☰</button>
+      <nav id="primary-nav" class="nav-menu">
         <button class="nav-btn active" data-target="dashboard">Дашборд</button>
         <button class="nav-btn" data-target="cards">Тех. карты</button>
         <button class="nav-btn" data-target="workorders">Трекер</button>
@@ -86,7 +87,7 @@
               <button class="btn-secondary" id="btn-directory-modal">Операции и участки</button>
             </div>
           </div>
-          <div id="cards-table-wrapper"></div>
+          <div id="cards-table-wrapper" class="table-wrapper"></div>
         </div>
       </div>
     </section>
@@ -135,7 +136,7 @@
           Исполнитель выбирает нужную операцию и нажимает <strong>«Начать»</strong>, при необходимости <strong>«Пауза»</strong> /
           <strong>«Продолжить»</strong>, после завершения — <strong>«Завершить»</strong>.
         </p>
-        <div id="workorders-table-wrapper"></div>
+        <div id="workorders-table-wrapper" class="table-wrapper"></div>
       </div>
     </section>
 
@@ -166,7 +167,7 @@
         <p style="font-size:12px; color:#6b7280; margin-top:0;">
           Архивные карты доступны только для просмотра. При необходимости нажмите «Повторить», чтобы создать копию и перезапустить процесс.
         </p>
-        <div id="archive-table-wrapper"></div>
+        <div id="archive-table-wrapper" class="table-wrapper"></div>
       </div>
     </section>
 
@@ -200,7 +201,7 @@
           <h2>Пользователи</h2>
           <button class="btn-primary" id="user-create">Создать пользователя</button>
         </div>
-        <div id="users-table"></div>
+        <div id="users-table" class="table-wrapper"></div>
       </div>
     </section>
 
@@ -211,7 +212,7 @@
           <h2>Уровни доступа</h2>
           <button class="btn-primary" id="access-level-create">Создать уровень</button>
         </div>
-        <div id="access-levels-table"></div>
+        <div id="access-levels-table" class="table-wrapper"></div>
       </div>
     </section>
     <div id="card-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="card-modal-title">
@@ -268,7 +269,7 @@
 
           <div class="card inset-card" id="route-editor">
             <h3>Маршрут выполнения операций</h3>
-            <div id="route-table-wrapper"></div>
+            <div id="route-table-wrapper" class="table-wrapper"></div>
             <div class="route-add-panel">
               <h3>Добавить операцию в маршрут</h3>
               <form id="route-form" class="flex route-form-grid" style="flex-wrap:wrap;">
@@ -463,11 +464,11 @@
         </div>
         <div class="log-section">
           <h4>История изменений</h4>
-          <div id="log-history-table"></div>
+          <div id="log-history-table" class="table-wrapper"></div>
         </div>
         <div class="log-section">
           <h4>Сводная таблица операций</h4>
-          <div id="log-summary-table"></div>
+          <div id="log-summary-table" class="table-wrapper"></div>
           <div class="log-summary-actions">
             <button type="button" id="log-print-summary" class="btn-primary">Печать сводной таблицы</button>
             <button type="button" id="log-print-all" class="btn-primary">Печать</button>
@@ -501,7 +502,7 @@
                 <button type="submit" class="btn-primary">Добавить участок</button>
               </div>
             </form>
-            <div id="centers-table-wrapper"></div>
+            <div id="centers-table-wrapper" class="table-wrapper"></div>
           </div>
 
           <div class="directory-panel">
@@ -523,7 +524,7 @@
                 <button type="submit" class="btn-primary">Добавить операцию</button>
               </div>
             </form>
-            <div id="ops-table-wrapper"></div>
+            <div id="ops-table-wrapper" class="table-wrapper"></div>
           </div>
         </div>
       </div>
@@ -625,7 +626,7 @@
 
   </div>
 
-  <script src="dashboard.js"></script>
-  <script src="app.js"></script>
+  <script src="dashboard.js" defer></script>
+  <script src="app.js" defer></script>
 </body>
 </html>

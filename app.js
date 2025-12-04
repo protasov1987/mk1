@@ -109,6 +109,36 @@ function hideMainApp() {
   if (app) app.classList.add('hidden');
 }
 
+function setupResponsiveNav() {
+  const toggle = document.getElementById('nav-toggle');
+  const nav = document.getElementById('primary-nav');
+  if (!toggle || !nav) return;
+
+  const closeMenu = () => {
+    nav.classList.remove('open');
+    toggle.setAttribute('aria-expanded', 'false');
+  };
+
+  toggle.addEventListener('click', () => {
+    const isOpen = nav.classList.toggle('open');
+    toggle.setAttribute('aria-expanded', String(isOpen));
+  });
+
+  nav.querySelectorAll('.nav-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (window.innerWidth <= 768) {
+        closeMenu();
+      }
+    });
+  });
+
+  window.addEventListener('resize', () => {
+    if (window.innerWidth > 768) {
+      closeMenu();
+    }
+  });
+}
+
 function handleUnauthorized(message = 'Требуется вход') {
   currentUser = null;
   updateUserBadge();
@@ -5327,6 +5357,7 @@ function setupSecurityControls() {
 
 // === ИНИЦИАЛИЗАЦИЯ ===
 document.addEventListener('DOMContentLoaded', async () => {
+  setupResponsiveNav();
   startRealtimeClock();
   setupAuthControls();
   updateUserBadge();
