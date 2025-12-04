@@ -37,6 +37,18 @@
 
   <div id="server-status" class="status-banner status-info hidden" role="status" aria-live="polite"></div>
 
+  <div id="auth-overlay" class="auth-overlay hidden" role="dialog" aria-modal="true">
+    <div class="auth-modal">
+      <h2>Вход</h2>
+      <form id="auth-form">
+        <label for="auth-password">Пароль</label>
+        <input type="password" id="auth-password" name="password" autocomplete="current-password" required />
+        <div id="auth-error" class="auth-error" aria-live="assertive"></div>
+        <button type="submit">Войти</button>
+      </form>
+    </div>
+  </div>
+
   <main>
     <!-- Дашборд -->
     <section id="dashboard" class="active">
