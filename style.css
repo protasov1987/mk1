@@ -727,7 +727,7 @@ tbody tr:nth-child(even) {
   display: none;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 1400;
 }
 
 .barcode-modal-content {
@@ -735,9 +735,23 @@ tbody tr:nth-child(even) {
   padding: 16px 20px;
   border-radius: 10px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
-  max-width: 320px;
-  width: 100%;
+  max-width: 480px;
+  width: min(480px, calc(100% - 24px));
   text-align: center;
+  overflow: hidden;
+}
+
+.barcode-viewport {
+  width: 100%;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.barcode-canvas {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 0 auto;
 }
 
 .barcode-modal-header {
@@ -748,6 +762,12 @@ tbody tr:nth-child(even) {
   font-size: 12px;
   color: #6b7280;
   margin: 4px 0 0;
+}
+
+.barcode-user-label {
+  margin-top: 6px;
+  font-size: 14px;
+  color: #111827;
 }
 
 .modal {
@@ -1458,6 +1478,71 @@ footer {
   font-size: 13px;
 }
 
+.password-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.password-row input {
+  flex: 1 1 200px;
+}
+
+.form-error {
+  color: #b91c1c;
+  font-size: 14px;
+}
+
+.security-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.security-table th,
+.security-table td {
+  border: 1px solid #e5e7eb;
+  padding: 8px;
+  text-align: left;
+}
+
+.security-table th {
+  background: #f3f4f6;
+}
+
+.permission-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.permission-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fafafa;
+}
+
+.permission-card h4 {
+  margin: 0 0 8px 0;
+}
+
+.executor-highlight {
+  background: #ecfdf3;
+  border: 2px solid #a7f3d0;
+  transform: scale(1.02);
+}
+
+.executor-highlight .action-buttons button {
+  transform: scale(1.05);
+}
+
+.user-panel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
 .user-badge {
   align-self: center;
   background: #0ea5e9;
@@ -1467,6 +1552,31 @@ footer {
   font-weight: 600;
   min-width: 120px;
   text-align: center;
+}
+
+.btn-logout {
+  background: #ef4444;
+  color: #fff;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.btn-logout:hover {
+  background: #dc2626;
+}
+
+/* Readonly tab helpers */
+.tab-readonly .view-disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.tab-readonly input.view-disabled,
+.tab-readonly select.view-disabled,
+.tab-readonly textarea.view-disabled {
+  background-color: #f3f4f6;
 }
 
 @media (max-width: 768px) {
