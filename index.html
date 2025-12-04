@@ -537,7 +537,10 @@
         <h3 id="barcode-modal-title">Штрихкод</h3>
         <p class="barcode-modal-hint">Формат EAN-13</p>
       </div>
-      <canvas id="barcode-canvas"></canvas>
+      <div class="barcode-viewport">
+        <canvas id="barcode-canvas" class="barcode-canvas"></canvas>
+      </div>
+      <div id="barcode-modal-user" class="barcode-user-label hidden"></div>
       <div style="margin-top:8px; font-size:14px;">
         Код: <span id="barcode-modal-code"></span>
       </div>

@@ -730,10 +730,17 @@ function openPasswordBarcode(password, username) {
   const canvas = document.getElementById('barcode-canvas');
   const codeSpan = document.getElementById('barcode-modal-code');
   const title = document.getElementById('barcode-modal-title');
+  const userLabel = document.getElementById('barcode-modal-user');
   if (!modal || !canvas || !codeSpan) return;
   if (title) title.textContent = 'Штрихкод пароля';
   drawCode128(canvas, password, username || password);
   codeSpan.textContent = password;
+  if (userLabel) {
+    const normalized = (username || '').trim();
+    userLabel.textContent = normalized ? `Пользователь: ${normalized}` : '';
+    userLabel.classList.toggle('hidden', !normalized);
+  }
+  modal.dataset.username = username || '';
   modal.style.display = 'flex';
 }
 
@@ -742,12 +749,19 @@ function openBarcodeModal(card) {
   const canvas = document.getElementById('barcode-canvas');
   const codeSpan = document.getElementById('barcode-modal-code');
   const title = document.getElementById('barcode-modal-title');
+  const userLabel = document.getElementById('barcode-modal-user');
   if (!modal || !canvas || !codeSpan) return;
 
   const isGroup = isGroupCard(card);
   if (title) {
     title.textContent = isGroup ? 'Штрихкод группы карт' : 'Штрихкод технологической карты';
   }
+
+  if (userLabel) {
+    userLabel.textContent = '';
+    userLabel.classList.add('hidden');
+  }
+  modal.dataset.username = '';
 
   if (!card.barcode || !/^\d{13}$/.test(card.barcode)) {
     card.barcode = generateUniqueEAN13();
@@ -780,6 +794,7 @@ function setupBarcodeModal() {
     printBtn.addEventListener('click', () => {
       const canvas = document.getElementById('barcode-canvas');
       const codeSpan = document.getElementById('barcode-modal-code');
+      const username = (modal.dataset.username || '').trim();
       if (!canvas) return;
       const dataUrl = canvas.toDataURL('image/png');
       const code = codeSpan ? codeSpan.textContent : '';
@@ -787,6 +802,9 @@ function setupBarcodeModal() {
       if (!win) return;
       win.document.write('<html><head><title>Печать штрихкода</title></head><body style="text-align:center;">');
       win.document.write('<img src="' + dataUrl + '" style="max-width:100%;"><br>');
+      if (username) {
+        win.document.write('<div style="margin:6px 0; font-size:14px;">Пользователь: ' + escapeHtml(username) + '</div>');
+      }
       win.document.write('<div style="margin-top:8px; font-size:16px;">' + code + '</div>');
       win.document.write('</body></html>');
       win.document.close();
