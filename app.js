@@ -31,6 +31,9 @@ let dashboardEligibleCache = [];
 let workspaceSearchTerm = '';
 let workspaceStopContext = null;
 let workspaceActiveModalInput = null;
+let currentUser = null;
+let appBootstrapped = false;
+let timersStarted = false;
 
 function setConnectionStatus(message, variant = 'info') {
   const banner = document.getElementById('server-status');
@@ -43,6 +46,61 @@ function setConnectionStatus(message, variant = 'info') {
 
   banner.textContent = message;
   banner.className = `status-banner status-${variant}`;
+}
+
+function updateUserBadge() {
+  const badge = document.getElementById('user-badge');
+  if (!badge) return;
+  if (currentUser) {
+    badge.textContent = currentUser.name || 'Пользователь';
+    badge.classList.remove('hidden');
+  } else {
+    badge.textContent = 'Не авторизовано';
+    badge.classList.remove('hidden');
+  }
+}
+
+function showAuthOverlay(message = '') {
+  const overlay = document.getElementById('login-overlay');
+  const errorEl = document.getElementById('login-error');
+  const input = document.getElementById('login-password');
+  if (!overlay) return;
+  if (errorEl) {
+    errorEl.textContent = message || '';
+    errorEl.style.display = message ? 'block' : 'none';
+  }
+  overlay.classList.remove('hidden');
+  if (input) {
+    input.value = '';
+    setTimeout(() => input.focus(), 50);
+  }
+}
+
+function hideAuthOverlay() {
+  const overlay = document.getElementById('login-overlay');
+  const errorEl = document.getElementById('login-error');
+  if (overlay) overlay.classList.add('hidden');
+  if (errorEl) {
+    errorEl.textContent = '';
+    errorEl.style.display = 'none';
+  }
+}
+
+function showMainApp() {
+  const app = document.getElementById('app-root');
+  if (app) app.classList.remove('hidden');
+}
+
+function hideMainApp() {
+  const app = document.getElementById('app-root');
+  if (app) app.classList.add('hidden');
+}
+
+function handleUnauthorized(message = 'Требуется вход') {
+  currentUser = null;
+  updateUserBadge();
+  hideMainApp();
+  showAuthOverlay(message);
 }
 
 function startRealtimeClock() {
@@ -911,8 +969,13 @@ async function saveData() {
     const res = await fetch(API_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cards, ops, centers })
+      body: JSON.stringify({ cards, ops, centers }),
+      credentials: 'include'
     });
+    if (res.status === 401) {
+      handleUnauthorized('Сессия истекла, войдите снова');
+      return;
+    }
     if (!res.ok) {
       throw new Error('Ответ сервера ' + res.status);
     }
@@ -975,7 +1038,11 @@ function ensureDefaults() {
 
 async function loadData() {
   try {
-    const res = await fetch(API_ENDPOINT);
+    const res = await fetch(API_ENDPOINT, { credentials: 'include' });
+    if (res.status === 401) {
+      handleUnauthorized('Введите пароль для продолжения работы');
+      throw new Error('Unauthorized');
+    }
     if (!res.ok) throw new Error('Ответ сервера ' + res.status);
     const payload = await res.json();
     cards = Array.isArray(payload.cards) ? payload.cards : [];
@@ -984,6 +1051,10 @@ async function loadData() {
     apiOnline = true;
     setConnectionStatus('', 'info');
   } catch (err) {
+    if (err.message === 'Unauthorized') {
+      apiOnline = false;
+      return;
+    }
     console.warn('Не удалось загрузить данные с сервера, используем пустые коллекции', err);
     apiOnline = false;
     setConnectionStatus('Нет соединения с сервером: данные будут только в этой сессии', 'error');
@@ -1028,6 +1099,120 @@ async function loadData() {
 
   if (apiOnline) {
     await saveData();
+  }
+}
+
+// === АВТОРИЗАЦИЯ ===
+async function performLogin(password) {
+  const errorEl = document.getElementById('login-error');
+  if (!password) {
+    if (errorEl) {
+      errorEl.style.display = 'block';
+      errorEl.textContent = 'Введите пароль';
+    }
+    return;
+  }
+
+  try {
+    const formData = new FormData();
+    formData.append('password', password);
+
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      body: formData,
+      credentials: 'include'
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!payload.success) {
+      const message = (payload && payload.error) ? payload.error : 'Неверный пароль';
+      if (errorEl) {
+        errorEl.style.display = 'block';
+        errorEl.textContent = message;
+      }
+      return;
+    }
+
+    currentUser = payload.user ? { name: payload.user } : null;
+    updateUserBadge();
+    hideAuthOverlay();
+    showMainApp();
+    await bootstrapApp();
+  } catch (err) {
+    if (errorEl) {
+      errorEl.style.display = 'block';
+      errorEl.textContent = 'Ошибка входа: ' + err.message;
+    }
+  }
+}
+
+async function restoreSession() {
+  try {
+    const res = await fetch('/api/session', { credentials: 'include' });
+    if (!res.ok) throw new Error('Unauthorized');
+    const payload = await res.json();
+    currentUser = payload.user || null;
+    updateUserBadge();
+    hideAuthOverlay();
+    showMainApp();
+    await bootstrapApp();
+  } catch (err) {
+    showAuthOverlay('Введите пароль для входа');
+  }
+}
+
+function setupAuthControls() {
+  const loginOverlay = document.getElementById('login-overlay');
+  const appRoot = document.getElementById('app-root');
+  const form = document.getElementById('login-form');
+  const input = document.getElementById('login-password');
+  const errorEl = document.getElementById('login-error');
+
+  if (loginOverlay) loginOverlay.classList.remove('hidden');
+  if (appRoot) appRoot.classList.add('hidden');
+
+  if (!form) {
+    console.error('login-form not found');
+    return;
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const pwd = (input && input.value) ? input.value.trim() : '';
+
+    if (errorEl) {
+      errorEl.style.display = 'none';
+      errorEl.textContent = '';
+    }
+
+    await performLogin(pwd);
+  });
+}
+
+async function bootstrapApp() {
+  await loadData();
+  if (!currentUser) return;
+
+  if (!appBootstrapped) {
+    setupNavigation();
+    setupCardsTabs();
+    setupForms();
+    setupBarcodeModal();
+    setupGroupTransferModal();
+    setupGroupExecutorModal();
+    setupAttachmentControls();
+    setupWorkspaceModal();
+    setupLogModal();
+    appBootstrapped = true;
+  }
+
+  renderEverything();
+  if (window.dashboardPager && typeof window.dashboardPager.updatePages === 'function') {
+    requestAnimationFrame(() => window.dashboardPager.updatePages());
+  }
+  if (!timersStarted) {
+    setInterval(tickTimers, 1000);
+    timersStarted = true;
   }
 }
 
@@ -4630,21 +4815,11 @@ function setupWorkspaceModal() {
 }
 
 // === ИНИЦИАЛИЗАЦИЯ ===
-  document.addEventListener('DOMContentLoaded', async () => {
-    startRealtimeClock();
-    await loadData();
-    setupNavigation();
-    setupCardsTabs();
-    setupForms();
-    setupBarcodeModal();
-    setupGroupTransferModal();
-    setupGroupExecutorModal();
-    setupAttachmentControls();
-    setupWorkspaceModal();
-    setupLogModal();
-    renderEverything();
-    if (window.dashboardPager && typeof window.dashboardPager.updatePages === 'function') {
-      requestAnimationFrame(() => window.dashboardPager.updatePages());
-    }
-    setInterval(tickTimers, 1000);
-  });
+document.addEventListener('DOMContentLoaded', async () => {
+  startRealtimeClock();
+  setupAuthControls();
+  updateUserBadge();
+  hideMainApp();
+  showAuthOverlay();
+  await restoreSession();
+});
