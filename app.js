@@ -4,9 +4,13 @@ const API_ENDPOINT = '/api/data';
 let cards = [];
 let ops = [];
 let centers = [];
+let accessLevels = [];
+let users = [];
 let workorderSearchTerm = '';
 let workorderStatusFilter = 'ALL';
 let workorderMissingExecutorFilter = 'ALL';
+let workorderAutoScrollEnabled = true;
+let suppressWorkorderAutoscroll = false;
 let archiveSearchTerm = '';
 let archiveStatusFilter = 'ALL';
 let apiOnline = false;
@@ -16,7 +20,6 @@ let activeCardDraft = null;
 let activeCardOriginalId = null;
 let activeCardIsNew = false;
 let cardsSearchTerm = '';
-let cardsContractTerm = '';
 let attachmentContext = null;
 let routeQtyManual = false;
 const ATTACH_ACCEPT = '.pdf,.doc,.docx,.jpg,.jpeg,.png,.zip,.rar,.7z';
@@ -24,6 +27,26 @@ const ATTACH_MAX_SIZE = 15 * 1024 * 1024; // 15 MB
 let logContextCardId = null;
 let clockIntervalId = null;
 const cardsGroupOpen = new Set();
+let groupExecutorContext = null;
+let dashboardStatusSnapshot = null;
+let dashboardEligibleCache = [];
+let workspaceSearchTerm = '';
+let workspaceStopContext = null;
+let workspaceActiveModalInput = null;
+const ACCESS_TAB_CONFIG = [
+  { key: 'dashboard', label: 'Дашборд' },
+  { key: 'cards', label: 'Тех. карты' },
+  { key: 'workorders', label: 'Трекер' },
+  { key: 'archive', label: 'Архив' },
+  { key: 'workspace', label: 'Рабочее место' },
+  { key: 'users', label: 'Пользователи' },
+  { key: 'accessLevels', label: 'Уровни доступа' }
+];
+const USER_DATALIST_ID = 'user-combobox-options';
+let currentUser = null;
+let appBootstrapped = false;
+let timersStarted = false;
+let inactivityTimer = null;
 
 function setConnectionStatus(message, variant = 'info') {
   const banner = document.getElementById('server-status');
@@ -37,6 +60,74 @@ function setConnectionStatus(message, variant = 'info') {
   banner.textContent = message;
   banner.className = `status-banner status-${variant}`;
 }
+
+function updateUserBadge() {
+  const badge = document.getElementById('user-badge');
+  if (!badge) return;
+  if (currentUser) {
+    badge.textContent = currentUser.name || 'Пользователь';
+    badge.classList.remove('hidden');
+  } else {
+    badge.textContent = 'Не авторизовано';
+    badge.classList.remove('hidden');
+  }
+}
+
+function showAuthOverlay(message = '') {
+  const overlay = document.getElementById('login-overlay');
+  const errorEl = document.getElementById('login-error');
+  const input = document.getElementById('login-password');
+  if (!overlay) return;
+  if (errorEl) {
+    errorEl.textContent = message || '';
+    errorEl.style.display = message ? 'block' : 'none';
+  }
+  overlay.classList.remove('hidden');
+  if (input) {
+    input.value = '';
+    setTimeout(() => input.focus(), 50);
+  }
+}
+
+function hideAuthOverlay() {
+  const overlay = document.getElementById('login-overlay');
+  const errorEl = document.getElementById('login-error');
+  if (overlay) overlay.classList.add('hidden');
+  if (errorEl) {
+    errorEl.textContent = '';
+    errorEl.style.display = 'none';
+  }
+}
+
+function showMainApp() {
+  const app = document.getElementById('app-root');
+  if (app) app.classList.remove('hidden');
+}
+
+function hideMainApp() {
+  const app = document.getElementById('app-root');
+  if (app) app.classList.add('hidden');
+}
+
+function handleUnauthorized(message = 'Требуется вход') {
+  currentUser = null;
+  updateUserBadge();
+  hideMainApp();
+  showAuthOverlay(message);
+}
+
+function resetInactivityTimer() {
+  if (!currentUser || !currentUser.permissions) return;
+  if (inactivityTimer) clearTimeout(inactivityTimer);
+  const minutes = currentUser.permissions.inactivityTimeoutMinutes || 30;
+  inactivityTimer = setTimeout(() => {
+    performLogout(true);
+  }, Math.max(1, minutes) * 60 * 1000);
+}
+
+['click', 'mousemove', 'keydown', 'touchstart'].forEach(evt => {
+  document.addEventListener(evt, () => resetInactivityTimer());
+});
 
 function startRealtimeClock() {
   const el = document.getElementById('realtime-clock');
@@ -119,6 +210,16 @@ function formatStartEnd(op) {
   return '<div class="nk-lines"><div>Н: ' + escapeHtml(formatDateTime(start)) + '</div><div>К: ' + escapeHtml(endLabel) + '</div></div>';
 }
 
+function generatePassword(len = 10) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz0123456789';
+  let pwd = '';
+  while (pwd.length < len) {
+    const idx = Math.floor(Math.random() * chars.length);
+    pwd += chars[idx];
+  }
+  return pwd;
+}
+
 // Время операции с учётом пауз / продолжений
 function getOperationElapsedSeconds(op) {
   const base = typeof op.elapsedSeconds === 'number' ? op.elapsedSeconds : 0;
@@ -132,6 +233,48 @@ function autoResizeComment(el) {
   if (!el) return;
   el.style.height = 'auto';
   el.style.height = el.scrollHeight + 'px';
+}
+
+function getUserPermissions() {
+  if (!currentUser || !currentUser.permissions) return null;
+  return currentUser.permissions;
+}
+
+function canViewTab(tabKey) {
+  const perms = getUserPermissions();
+  if (!perms) return true;
+  const tab = perms.tabs && perms.tabs[tabKey];
+  return tab ? !!tab.view : true;
+}
+
+function canEditTab(tabKey) {
+  const perms = getUserPermissions();
+  if (!perms) return true;
+  const tab = perms.tabs && perms.tabs[tabKey];
+  return tab ? !!tab.edit : false;
+}
+
+function isTabReadonly(tabKey) {
+  return canViewTab(tabKey) && !canEditTab(tabKey);
+}
+
+function applyReadonlyState(tabKey, sectionId) {
+  const section = document.getElementById(sectionId);
+  if (!section) return;
+  const readonly = isTabReadonly(tabKey);
+  section.classList.toggle('tab-readonly', readonly);
+
+  const controls = section.querySelectorAll('input, select, textarea, button');
+  controls.forEach(ctrl => {
+    const allowView = ctrl.dataset.allowView === 'true';
+    if (readonly && !allowView) {
+      ctrl.disabled = true;
+      ctrl.classList.add('view-disabled');
+    } else {
+      ctrl.disabled = false;
+      ctrl.classList.remove('view-disabled');
+    }
+  });
 }
 
 function cloneCard(card) {
@@ -151,6 +294,58 @@ function toSafeCount(val) {
   const num = parseInt(val, 10);
   if (!Number.isFinite(num) || num < 0) return 0;
   return num;
+}
+
+function formatCardNameWithGroupPosition(card, { includeArchivedSiblings = false } = {}) {
+  if (!card) return '';
+
+  const baseName = card.name || card.id || '';
+  if (!card.groupId) return escapeHtml(baseName);
+
+  const siblings = cards.filter(c => c.groupId === card.groupId && (includeArchivedSiblings || !c.archived));
+  let displayName = baseName;
+  let position = null;
+
+  const nameMatch = /^\s*(\d+)\.\s*(.*)$/.exec(displayName || '');
+  if (nameMatch) {
+    position = toSafeCount(nameMatch[1]);
+    displayName = nameMatch[2] || '';
+  }
+
+  if (!position && siblings.length) {
+    const idx = siblings.findIndex(c => c.id === card.id);
+    position = idx >= 0 ? idx + 1 : null;
+  }
+
+  const total = siblings.length || null;
+  const prefix = position && total ? '<span class="group-position">' + position + '/' + total + '</span> ' : '';
+
+  return prefix + escapeHtml(displayName.trim());
+}
+
+function getCardPlannedQuantity(card) {
+  if (!card) return { qty: null, hasValue: false };
+  const rawQty = card.quantity !== '' && card.quantity != null
+    ? card.quantity
+    : (card.initialSnapshot && card.initialSnapshot.quantity);
+
+  if (rawQty !== '' && rawQty != null) {
+    return { qty: toSafeCount(rawQty), hasValue: true };
+  }
+
+  const snapshotItems = Array.isArray(card.initialSnapshot && card.initialSnapshot.items)
+    ? card.initialSnapshot.items.length
+    : null;
+  if (snapshotItems) {
+    return { qty: snapshotItems, hasValue: true };
+  }
+
+  const itemsCount = Array.isArray(card.items) ? card.items.length : null;
+  if (itemsCount) {
+    return { qty: itemsCount, hasValue: true };
+  }
+
+  return { qty: null, hasValue: false };
 }
 
 function formatStepCode(step) {
@@ -176,6 +371,25 @@ function sumItemCounts(items = []) {
     acc.hold += toSafeCount(item && item.holdCount != null ? item.holdCount : 0);
     return acc;
   }, { good: 0, scrap: 0, hold: 0 });
+}
+
+function calculateFinalResults(operations = [], initialQty = 0) {
+  const total = toSafeCount(initialQty);
+  const opsSorted = Array.isArray(operations)
+    ? operations.filter(Boolean).slice().sort((a, b) => (a.order || 0) - (b.order || 0))
+    : [];
+
+  const lastOp = opsSorted[opsSorted.length - 1];
+  const goodFinal = toSafeCount(lastOp && lastOp.goodCount != null ? lastOp.goodCount : 0);
+  const scrapFinal = toSafeCount(lastOp && lastOp.scrapCount != null ? lastOp.scrapCount : 0);
+  const delayedFinal = toSafeCount(lastOp && lastOp.holdCount != null ? lastOp.holdCount : 0);
+
+  return {
+    good_final: goodFinal,
+    scrap_final: scrapFinal,
+    delayed_final: delayedFinal,
+    summary_ok: total === 0 || goodFinal + scrapFinal + delayedFinal === total
+  };
 }
 
 function buildItemsFromTemplate(template = [], qty = 0) {
@@ -480,11 +694,97 @@ function getBarcodeDataUrl(code) {
   return canvas.toDataURL('image/png');
 }
 
+const CODE128_PATTERNS = [
+  '11011001100','11001101100','11001100110','10010011000','10010001100','10001001100','10011001000','10011000100','10001100100','11001001000',
+  '11001000100','11000100100','10110011100','10011011100','10011001110','10111001100','10011101100','10011100110','11001110010','11001011100',
+  '11001001110','11011100100','11001110100','11101101110','11101001100','11100101100','11100100110','11101100100','11100110100','11100110010',
+  '11011011000','11011000110','11000110110','10100011000','10001011000','10001000110','10110001000','10001101000','10001100010','11010001000',
+  '11000101000','11000100010','10110111000','10110001110','10001101110','10111011000','10111000110','10001110110','11101110110','11010001110',
+  '11000101110','11011101000','11011100010','11011101110','11101011000','11101000110','11100010110','11101101000','11101100010','11100011010',
+  '11101111010','11001000010','11110001010','10100110000','10100001100','10010110000','10010000110','10000101100','10000100110','10110010000',
+  '10110000100','10011010000','10011000010','10000110100','10000110010','11000010010','11001010000','11110111010','11000010100','10001111010',
+  '10100111100','10010111100','10010011110','10111100100','10011110100','10011110010','11110100100','11110010100','11110010010','11011011110',
+  '11011110110','11110110110','10101111000','10100011110','10001011110','10111101000','10111100010','11110101000','11110100010','10111011110',
+  '10111101110','11101011110','11110101110','11010000100','11010010000','11010011100','1100011101011'
+];
+
+function drawCode128(canvas, value, label) {
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const text = value || '';
+  const codes = [];
+  const startCode = 104; // Code B
+  codes.push(startCode);
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    const mapped = code - 32;
+    codes.push(mapped);
+  }
+  let checksum = startCode;
+  for (let i = 0; i < codes.length; i++) {
+    checksum += codes[i] * (i === 0 ? 1 : i);
+  }
+  const checksumCode = checksum % 103;
+  codes.push(checksumCode);
+  codes.push(106); // stop
+
+  const bits = codes.map(c => CODE128_PATTERNS[c] || '').join('');
+  const barWidth = 2;
+  const barHeight = 80;
+  const width = bits.length * barWidth + 20;
+  const height = barHeight + 30;
+  canvas.width = width;
+  canvas.height = height;
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = '#000';
+  for (let i = 0; i < bits.length; i++) {
+    if (bits[i] === '1') {
+      ctx.fillRect(10 + i * barWidth, 5, barWidth, barHeight);
+    }
+  }
+  ctx.font = '14px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(label || text, width / 2, barHeight + 22);
+}
+
+function openPasswordBarcode(password, username) {
+  const modal = document.getElementById('barcode-modal');
+  const canvas = document.getElementById('barcode-canvas');
+  const codeSpan = document.getElementById('barcode-modal-code');
+  const title = document.getElementById('barcode-modal-title');
+  const userLabel = document.getElementById('barcode-modal-user');
+  if (!modal || !canvas || !codeSpan) return;
+  if (title) title.textContent = 'Штрихкод пароля';
+  drawCode128(canvas, password, username || password);
+  codeSpan.textContent = password;
+  if (userLabel) {
+    const normalized = (username || '').trim();
+    userLabel.textContent = normalized ? `Пользователь: ${normalized}` : '';
+    userLabel.classList.toggle('hidden', !normalized);
+  }
+  modal.dataset.username = username || '';
+  modal.style.display = 'flex';
+}
+
 function openBarcodeModal(card) {
   const modal = document.getElementById('barcode-modal');
   const canvas = document.getElementById('barcode-canvas');
   const codeSpan = document.getElementById('barcode-modal-code');
+  const title = document.getElementById('barcode-modal-title');
+  const userLabel = document.getElementById('barcode-modal-user');
   if (!modal || !canvas || !codeSpan) return;
+
+  const isGroup = isGroupCard(card);
+  if (title) {
+    title.textContent = isGroup ? 'Штрихкод группы карт' : 'Штрихкод технологической карты';
+  }
+
+  if (userLabel) {
+    userLabel.textContent = '';
+    userLabel.classList.add('hidden');
+  }
+  modal.dataset.username = '';
 
   if (!card.barcode || !/^\d{13}$/.test(card.barcode)) {
     card.barcode = generateUniqueEAN13();
@@ -513,16 +813,11 @@ function setupBarcodeModal() {
     closeBtn.addEventListener('click', closeBarcodeModal);
   }
 
-  modal.addEventListener('click', (e) => {
-    if (e.target === modal) {
-      closeBarcodeModal();
-    }
-  });
-
   if (printBtn) {
     printBtn.addEventListener('click', () => {
       const canvas = document.getElementById('barcode-canvas');
       const codeSpan = document.getElementById('barcode-modal-code');
+      const username = (modal.dataset.username || '').trim();
       if (!canvas) return;
       const dataUrl = canvas.toDataURL('image/png');
       const code = codeSpan ? codeSpan.textContent : '';
@@ -530,6 +825,9 @@ function setupBarcodeModal() {
       if (!win) return;
       win.document.write('<html><head><title>Печать штрихкода</title></head><body style="text-align:center;">');
       win.document.write('<img src="' + dataUrl + '" style="max-width:100%;"><br>');
+      if (username) {
+        win.document.write('<div style="margin:6px 0; font-size:14px;">Пользователь: ' + escapeHtml(username) + '</div>');
+      }
       win.document.write('<div style="margin-top:8px; font-size:16px;">' + code + '</div>');
       win.document.write('</body></html>');
       win.document.close();
@@ -689,11 +987,11 @@ function cardStatusText(card) {
   return 'Не запущена';
 }
 
-function getCardProcessState(card) {
+function getCardProcessState(card, { includeArchivedChildren = false } = {}) {
   if (isGroupCard(card)) {
-    const children = getGroupChildren(card).filter(c => !c.archived);
+    const children = getGroupChildren(card).filter(c => includeArchivedChildren || !c.archived);
     if (!children.length) return { key: 'NOT_STARTED', label: 'Не запущено', className: 'not-started' };
-    const childStates = children.map(c => getCardProcessState(c));
+    const childStates = children.map(c => getCardProcessState(c, { includeArchivedChildren }));
     const hasPausedOp = children.some(ch => (ch.operations || []).some(op => op.status === 'PAUSED'));
     const hasInProgress = childStates.some(s => s.key === 'IN_PROGRESS');
     const hasPaused = childStates.some(s => s.key === 'PAUSED' || s.key === 'MIXED');
@@ -742,8 +1040,8 @@ function groupHasMissingExecutors(group) {
   return children.some(cardHasMissingExecutors);
 }
 
-function renderCardStateBadge(card) {
-  const state = getCardProcessState(card);
+function renderCardStateBadge(card, options) {
+  const state = getCardProcessState(card, options);
   if (state.key === 'DONE') {
     return '<span class="status-pill status-pill-done" title="Выполнено">✓</span>';
   }
@@ -833,8 +1131,13 @@ async function saveData() {
     const res = await fetch(API_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cards, ops, centers })
+      body: JSON.stringify({ cards, ops, centers }),
+      credentials: 'include'
     });
+    if (res.status === 401) {
+      handleUnauthorized('Сессия истекла, войдите снова');
+      return;
+    }
     if (!res.ok) {
       throw new Error('Ответ сервера ' + res.status);
     }
@@ -897,15 +1200,25 @@ function ensureDefaults() {
 
 async function loadData() {
   try {
-    const res = await fetch(API_ENDPOINT);
+    const res = await fetch(API_ENDPOINT, { credentials: 'include' });
+    if (res.status === 401) {
+      handleUnauthorized('Введите пароль для продолжения работы');
+      throw new Error('Unauthorized');
+    }
     if (!res.ok) throw new Error('Ответ сервера ' + res.status);
     const payload = await res.json();
     cards = Array.isArray(payload.cards) ? payload.cards : [];
     ops = Array.isArray(payload.ops) ? payload.ops : [];
     centers = Array.isArray(payload.centers) ? payload.centers : [];
+    accessLevels = Array.isArray(payload.accessLevels) ? payload.accessLevels : [];
+    users = Array.isArray(payload.users) ? payload.users : [];
     apiOnline = true;
     setConnectionStatus('', 'info');
   } catch (err) {
+    if (err.message === 'Unauthorized') {
+      apiOnline = false;
+      return;
+    }
     console.warn('Не удалось загрузить данные с сервера, используем пустые коллекции', err);
     apiOnline = false;
     setConnectionStatus('Нет соединения с сервером: данные будут только в этой сессии', 'error');
@@ -953,6 +1266,190 @@ async function loadData() {
   }
 }
 
+async function loadSecurityData() {
+  try {
+    const [usersRes, levelsRes] = await Promise.all([
+      fetch('/api/security/users', { credentials: 'include' }),
+      fetch('/api/security/access-levels', { credentials: 'include' })
+    ]);
+    if (usersRes.ok) {
+      const payload = await usersRes.json();
+      users = Array.isArray(payload.users) ? payload.users : [];
+      renderUserDatalist();
+    }
+    if (levelsRes.ok) {
+      const payload = await levelsRes.json();
+      accessLevels = Array.isArray(payload.accessLevels) ? payload.accessLevels : [];
+    }
+  } catch (err) {
+    console.error('Не удалось загрузить данные доступа', err);
+  }
+}
+
+// === АВТОРИЗАЦИЯ ===
+async function performLogin(password) {
+  const errorEl = document.getElementById('login-error');
+  if (!password) {
+    if (errorEl) {
+      errorEl.style.display = 'block';
+      errorEl.textContent = 'Введите пароль';
+    }
+    return;
+  }
+
+  try {
+    const formData = new FormData();
+    formData.append('password', password);
+
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      body: formData,
+      credentials: 'include'
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!payload.success) {
+      const message = (payload && payload.error) ? payload.error : 'Неверный пароль';
+      if (errorEl) {
+        errorEl.style.display = 'block';
+        errorEl.textContent = message;
+      }
+      return;
+    }
+
+    currentUser = payload.user || null;
+    updateUserBadge();
+    hideAuthOverlay();
+    showMainApp();
+    await bootstrapApp();
+    applyNavigationPermissions();
+    resetInactivityTimer();
+  } catch (err) {
+    if (errorEl) {
+      errorEl.style.display = 'block';
+      errorEl.textContent = 'Ошибка входа: ' + err.message;
+    }
+  }
+}
+
+async function restoreSession() {
+  try {
+    const res = await fetch('/api/session', { credentials: 'include' });
+    if (!res.ok) throw new Error('Unauthorized');
+    const payload = await res.json();
+    currentUser = payload.user || null;
+    updateUserBadge();
+    hideAuthOverlay();
+    showMainApp();
+    applyNavigationPermissions();
+    await bootstrapApp();
+    resetInactivityTimer();
+  } catch (err) {
+    showAuthOverlay('Введите пароль для входа');
+  }
+}
+
+async function performLogout(silent = false) {
+  try {
+    await fetch('/api/logout', { method: 'POST', credentials: 'include' });
+  } catch (err) {
+    if (!silent) console.error('Logout failed', err);
+  }
+  currentUser = null;
+  updateUserBadge();
+  hideMainApp();
+  showAuthOverlay('Сессия завершена');
+}
+
+function applyNavigationPermissions() {
+  const navButtons = document.querySelectorAll('.nav-btn');
+  const allowedTabs = [];
+  navButtons.forEach(btn => {
+    const target = btn.getAttribute('data-target');
+    const allowed = canViewTab(target);
+    btn.classList.toggle('hidden', !allowed);
+    const section = document.getElementById(target);
+    if (section) section.classList.toggle('hidden', !allowed);
+    if (allowed) allowedTabs.push(target);
+  });
+
+  const forcedTab = currentUser && currentUser.name === 'Abyss' ? 'dashboard' : (currentUser?.permissions?.landingTab || 'dashboard');
+  const selected = canViewTab(forcedTab) ? forcedTab : (allowedTabs[0] || 'dashboard');
+  activateTab(selected);
+}
+
+function syncReadonlyLocks() {
+  applyReadonlyState('dashboard', 'dashboard');
+  applyReadonlyState('cards', 'cards');
+  applyReadonlyState('workorders', 'workorders');
+  applyReadonlyState('archive', 'archive');
+  applyReadonlyState('workspace', 'workspace');
+  applyReadonlyState('users', 'users');
+  applyReadonlyState('accessLevels', 'access-levels');
+}
+
+function setupAuthControls() {
+  const loginOverlay = document.getElementById('login-overlay');
+  const appRoot = document.getElementById('app-root');
+  const form = document.getElementById('login-form');
+  const input = document.getElementById('login-password');
+  const errorEl = document.getElementById('login-error');
+
+  if (loginOverlay) loginOverlay.classList.remove('hidden');
+  if (appRoot) appRoot.classList.add('hidden');
+
+  if (!form) {
+    console.error('login-form not found');
+    return;
+  }
+
+  const logoutBtn = document.getElementById('btn-logout');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', () => performLogout());
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const pwd = (input && input.value) ? input.value.trim() : '';
+
+    if (errorEl) {
+      errorEl.style.display = 'none';
+      errorEl.textContent = '';
+    }
+
+    await performLogin(pwd);
+  });
+}
+
+async function bootstrapApp() {
+  await loadData();
+  await loadSecurityData();
+  if (!currentUser) return;
+
+  if (!appBootstrapped) {
+    setupNavigation();
+    setupCardsTabs();
+    setupForms();
+    setupBarcodeModal();
+    setupGroupTransferModal();
+    setupGroupExecutorModal();
+    setupAttachmentControls();
+    setupWorkspaceModal();
+    setupLogModal();
+    setupSecurityControls();
+    appBootstrapped = true;
+  }
+
+  renderEverything();
+  if (window.dashboardPager && typeof window.dashboardPager.updatePages === 'function') {
+    requestAnimationFrame(() => window.dashboardPager.updatePages());
+  }
+  if (!timersStarted) {
+    setInterval(tickTimers, 1000);
+    timersStarted = true;
+  }
+}
+
 // === РЕНДЕРИНГ ДАШБОРДА ===
 function renderDashboard() {
   const statsContainer = document.getElementById('dashboard-stats');
@@ -977,15 +1474,52 @@ function renderDashboard() {
   });
 
   const dashTableWrapper = document.getElementById('dashboard-cards');
-  const eligibleCards = activeCards.filter(c => c.status !== 'NOT_STARTED');
+  const currentStatusSnapshot = (() => {
+    const map = new Map();
+    cards.forEach(card => {
+      if (card && !card.archived) {
+        map.set(card.id, card.status || 'NOT_STARTED');
+      }
+    });
+    return map;
+  })();
+
+  const statusChanged = (() => {
+    if (!dashboardStatusSnapshot) return true;
+    if (dashboardStatusSnapshot.size !== currentStatusSnapshot.size) return true;
+    for (const [id, status] of currentStatusSnapshot.entries()) {
+      if (dashboardStatusSnapshot.get(id) !== status) return true;
+    }
+    return false;
+  })();
+
+  dashboardStatusSnapshot = currentStatusSnapshot;
+  if (statusChanged) {
+    dashboardEligibleCache = activeCards.filter(c => c.status !== 'NOT_STARTED');
+  }
+  const eligibleCards = dashboardEligibleCache;
+  const emptyMessage = '<p>Карт для отображения пока нет.</p>';
+  const tableHeader = '<thead><tr><th>№ карты (EAN-13)</th><th>Наименование</th><th>Заказ</th><th>Статус / операции</th><th>Сделано деталей</th><th>Выполнено операций</th><th>Комментарии</th></tr></thead>';
+
   if (!eligibleCards.length) {
-    dashTableWrapper.innerHTML = '<p>Карт для отображения пока нет.</p>';
+    if (window.dashboardPager && typeof window.dashboardPager.render === 'function') {
+      window.dashboardPager.render({
+        headerHtml: tableHeader,
+        rowsHtml: [],
+        emptyMessage
+      });
+    } else if (dashTableWrapper) {
+      dashTableWrapper.innerHTML = emptyMessage;
+    }
     return;
   }
 
-  let html = '<table><thead><tr><th>№ карты (EAN-13)</th><th>Наименование</th><th>Заказ</th><th>Статус / операции</th><th>Сделано деталей</th><th>Выполнено операций</th><th>Комментарии</th></tr></thead><tbody>';
+  if (!statusChanged) {
+    updateDashboardTimers();
+    return;
+  }
 
-  eligibleCards.forEach(card => {
+  const rowsHtml = eligibleCards.map(card => {
     const opsArr = card.operations || [];
     const activeOps = opsArr.filter(o => o.status === 'IN_PROGRESS' || o.status === 'PAUSED');
     let statusHtml = '';
@@ -1007,8 +1541,9 @@ function renderDashboard() {
         if (plannedSec && elapsed > plannedSec) {
           cls += ' dash-op-overdue';
         }
-        statusHtml += '<span class="' + cls + '">' +
-          renderOpLabel(op) + ' — ' + formatSecondsToHMS(elapsed) +
+        statusHtml += '<span class="' + cls + '" data-card-id="' + card.id + '" data-op-id="' + op.id + '">' +
+          '<span class="dash-op-label">' + renderOpLabel(op) + '</span>' +
+          ' — <span class="dash-op-time">' + formatSecondsToHMS(elapsed) + '</span>' +
           '</span>';
       });
     } else {
@@ -1027,24 +1562,30 @@ function renderDashboard() {
       }
     }
 
-    const qtyTotal = toSafeCount(card.quantity);
-    const qtyLines = opsForDisplay.length
-      ? opsForDisplay.map(op => {
+    const { qty: qtyTotal, hasValue: hasQty } = getCardPlannedQuantity(card);
+    let qtyCell = '—';
+
+    if (card.status === 'DONE' && hasQty) {
+      const batchResult = calculateFinalResults(opsArr, qtyTotal || 0);
+      const qtyText = (batchResult.good_final || 0) + ' из ' + qtyTotal;
+      qtyCell = '<div class="dash-qty-line">' + qtyText + '</div>';
+    } else if (opsForDisplay.length && hasQty) {
+      const qtyLines = opsForDisplay.map(op => {
         const good = toSafeCount(op.goodCount || 0);
-        const qtyText = qtyTotal > 0 ? (good + ' из ' + qtyTotal) : '—';
+        const qtyText = good + ' из ' + qtyTotal;
         return '<div class="dash-qty-line">' + qtyText + '</div>';
-      })
-      : [];
+      });
+      qtyCell = qtyLines.length ? qtyLines.join('') : '—';
+    }
 
     const completedCount = opsArr.filter(o => o.status === 'DONE').length;
     const commentLines = opsForDisplay
       .filter(o => o.comment)
       .map(o => '<div class="dash-comment-line"><span class="dash-comment-op">' + renderOpLabel(o) + ':</span> ' + escapeHtml(o.comment) + '</div>');
-    const qtyCell = qtyLines.length ? qtyLines.join('') : '—';
     const commentCell = commentLines.join('');
 
-    const nameCell = (card.groupId ? '<span class="group-marker">(Г)</span>' : '') + escapeHtml(card.name);
-    html += '<tr>' +
+    const nameCell = formatCardNameWithGroupPosition(card);
+    return '<tr>' +
       '<td>' + escapeHtml(card.barcode || '') + '</td>' +
       '<td>' + nameCell + '</td>' +
       '<td>' + escapeHtml(card.orderNo || '') + '</td>' +
@@ -1055,8 +1596,37 @@ function renderDashboard() {
       '</tr>';
   });
 
-  html += '</tbody></table>';
-  dashTableWrapper.innerHTML = html;
+  if (window.dashboardPager && typeof window.dashboardPager.render === 'function') {
+    window.dashboardPager.render({
+      headerHtml: tableHeader,
+      rowsHtml,
+      emptyMessage
+    });
+  } else if (dashTableWrapper) {
+    dashTableWrapper.innerHTML = '<table>' + tableHeader + '<tbody>' + rowsHtml.join('') + '</tbody></table>';
+  }
+}
+
+function updateDashboardTimers() {
+  const nodes = document.querySelectorAll('.dashboard-card-status .dash-op[data-card-id][data-op-id]');
+  nodes.forEach(node => {
+    const cardId = node.getAttribute('data-card-id');
+    const opId = node.getAttribute('data-op-id');
+    const card = cards.find(c => c.id === cardId);
+    const op = card ? (card.operations || []).find(o => o.id === opId) : null;
+    if (!op) return;
+
+    const elapsed = getOperationElapsedSeconds(op);
+    const plannedSec = (op.plannedMinutes || 0) * 60;
+    const timeSpan = node.querySelector('.dash-op-time');
+
+    if (timeSpan) {
+      timeSpan.textContent = formatSecondsToHMS(elapsed);
+    }
+
+    node.classList.toggle('dash-op-paused', op.status === 'PAUSED');
+    node.classList.toggle('dash-op-overdue', plannedSec && elapsed > plannedSec);
+  });
 }
 
 // === РЕНДЕРИНГ ТЕХ.КАРТ ===
@@ -1069,13 +1639,8 @@ function renderCardsTable() {
   }
 
   const termRaw = cardsSearchTerm.trim();
-  const contractTerm = cardsContractTerm.trim().toLowerCase();
   const cardMatches = (card) => {
-    const matchesContract = contractTerm
-      ? (card.contractNumber || '').toLowerCase().includes(contractTerm)
-      : true;
-    const matchesSearch = termRaw ? cardSearchScore(card, termRaw) > 0 : true;
-    return matchesContract && matchesSearch;
+    return termRaw ? cardSearchScore(card, termRaw) > 0 : true;
   };
 
   let sortedCards = [...visibleCards];
@@ -1127,7 +1692,7 @@ function renderCardsTable() {
           const childFiles = (child.attachments || []).length;
           html += '<tr class="group-child-row" data-parent="' + card.id + '">' +
             '<td><button class="btn-link barcode-link" data-id="' + child.id + '">' + escapeHtml(child.barcode || '') + '</button></td>' +
-            '<td class="group-indent"><span class="group-marker">(Г)</span>' + escapeHtml(child.name) + '</td>' +
+            '<td class="group-indent">' + formatCardNameWithGroupPosition(child) + '</td>' +
             '<td>' + escapeHtml(child.orderNo || '') + '</td>' +
             '<td>' + cardStatusText(child) + '</td>' +
             '<td>' + ((child.operations || []).length) + '</td>' +
@@ -1236,6 +1801,8 @@ function renderCardsTable() {
       openAttachmentsModal(btn.getAttribute('data-attach-card'), 'live');
     });
   });
+
+  applyReadonlyState('cards', 'cards');
 }
 
 function buildCardCopy(template, { nameOverride, groupId = null } = {}) {
@@ -1301,10 +1868,10 @@ function duplicateCard(cardId) {
   renderEverything();
 }
 
-function duplicateGroup(groupId) {
+function duplicateGroup(groupId, { includeArchivedChildren = false } = {}) {
   const group = cards.find(c => c.id === groupId && isGroupCard(c));
   if (!group) return;
-  const children = getGroupChildren(group).filter(c => !c.archived);
+  const children = getGroupChildren(group).filter(c => includeArchivedChildren || !c.archived);
   const newGroup = {
     id: genId('group'),
     isGroup: true,
@@ -1327,12 +1894,27 @@ function duplicateGroup(groupId) {
   children.forEach((child, idx) => {
     const baseName = child.name ? child.name.replace(/^\d+\.\s*/, '') : group.name || 'Карта';
     const copy = buildCardCopy(child, { nameOverride: (idx + 1) + '. ' + baseName, groupId: newGroup.id });
+    ensureCardMeta(copy);
+    recalcCardStatus(copy);
     cards.push(copy);
   });
 
   recalcCardStatus(newGroup);
   saveData();
   renderEverything();
+  return newGroup;
+}
+
+function openGroupTransferModal() {
+  const modal = document.getElementById('group-transfer-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+}
+
+function closeGroupTransferModal() {
+  const modal = document.getElementById('group-transfer-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
 }
 
 function deleteGroup(groupId) {
@@ -1350,8 +1932,20 @@ function printGroupList(groupId) {
   const children = getGroupChildren(group).filter(c => !c.archived);
   const win = window.open('', '_blank');
   if (!win) return;
-  win.document.write('<html><head><title>Список карт группы</title></head><body>');
+  win.document.write('<html><head><title>Список карт группы</title><style> .print-meta { margin: 12px 0; } .print-meta div { margin: 4px 0; font-size: 14px; } </style></head><body>');
   win.document.write('<h3>Группа: ' + escapeHtml(group.name || '') + '</h3>');
+
+  if (children.length > 0) {
+    const firstCard = children[0];
+    win.document.write('<div class="print-meta">');
+    win.document.write('<div><strong>Номер / код заказа:</strong> ' + escapeHtml(firstCard.orderNo || '') + '</div>');
+    win.document.write('<div><strong>Чертёж / обозначение детали:</strong> ' + escapeHtml(firstCard.drawing || '') + '</div>');
+    win.document.write('<div><strong>Материал:</strong> ' + escapeHtml(firstCard.material || '') + '</div>');
+    win.document.write('<div><strong>Номер договора:</strong> ' + escapeHtml(firstCard.contractNumber || '') + '</div>');
+    win.document.write('<div><strong>Описание:</strong> ' + escapeHtml(firstCard.desc || '') + '</div>');
+    win.document.write('</div>');
+  }
+
   win.document.write('<ol>');
   children.forEach(child => {
     win.document.write('<li>' + escapeHtml(child.name || '') + ' — ' + escapeHtml(child.barcode || '') + '</li>');
@@ -1830,6 +2424,88 @@ function updateAttachmentCounters(cardId) {
   }
 }
 
+function openGroupExecutorModal(groupId) {
+  const modal = document.getElementById('group-executor-modal');
+  const executorInput = document.getElementById('group-executor-input');
+  const opCodeInput = document.getElementById('group-op-code-input');
+  const group = cards.find(c => c.id === groupId && isGroupCard(c));
+  if (!modal || !group) return;
+  groupExecutorContext = { groupId };
+  if (executorInput) executorInput.value = '';
+  if (opCodeInput) opCodeInput.value = '';
+  modal.classList.remove('hidden');
+  if (executorInput) executorInput.focus();
+}
+
+function closeGroupExecutorModal() {
+  const modal = document.getElementById('group-executor-modal');
+  if (modal) modal.classList.add('hidden');
+  groupExecutorContext = null;
+}
+
+function applyGroupExecutorToGroup() {
+  const executorInput = document.getElementById('group-executor-input');
+  const opCodeInput = document.getElementById('group-op-code-input');
+  if (!groupExecutorContext) return;
+
+  const executor = (executorInput ? executorInput.value : '').trim();
+  const opCodeRaw = (opCodeInput ? opCodeInput.value : '').trim();
+  const group = cards.find(c => c.id === groupExecutorContext.groupId && isGroupCard(c));
+
+  if (!group) {
+    closeGroupExecutorModal();
+    return;
+  }
+
+  if (!executor || !opCodeRaw) {
+    alert('Укажите группового исполнителя и код операции.');
+    return;
+  }
+
+  const targetCode = opCodeRaw.toUpperCase();
+  const children = getGroupChildren(group).filter(c => !c.archived);
+  let matched = 0;
+  let updated = 0;
+
+  children.forEach(card => {
+    (card.operations || []).forEach(op => {
+      const opCodeValue = (op.opCode || '').trim().toUpperCase();
+      if (opCodeValue !== targetCode) return;
+      matched++;
+      const prevExecutor = op.executor || '';
+      const prevExtras = Array.isArray(op.additionalExecutors) ? [...op.additionalExecutors] : [];
+      const extrasChanged = prevExtras.length > 0;
+      const executorChanged = prevExecutor !== executor;
+      op.executor = executor;
+      op.additionalExecutors = [];
+      if (executorChanged) {
+        recordCardLog(card, { action: 'Исполнитель', object: opLogLabel(op), field: 'executor', targetId: op.id, oldValue: prevExecutor, newValue: executor });
+      }
+      if (extrasChanged) {
+        recordCardLog(card, { action: 'Доп. исполнитель', object: opLogLabel(op), field: 'additionalExecutors', targetId: op.id, oldValue: prevExtras.join(', '), newValue: 'очищено' });
+      }
+      if (executorChanged || extrasChanged) {
+        updated++;
+      }
+    });
+    recalcCardStatus(card);
+  });
+
+  recalcCardStatus(group);
+
+  if (!matched) {
+    alert('В группе нет операций с указанным кодом.');
+    return;
+  }
+
+  if (updated) {
+    saveData();
+    renderDashboard();
+  }
+  renderWorkordersTable();
+  closeGroupExecutorModal();
+}
+
 function buildLogHistoryTable(card) {
   const logs = (card.logs || []).slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
   if (!logs.length) return '<p>История изменений пока отсутствует.</p>';
@@ -2226,11 +2902,6 @@ function setupLogModal() {
   if (closeBottomBtn) {
     closeBottomBtn.addEventListener('click', () => closeLogModal());
   }
-  if (modal) {
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) closeLogModal();
-    });
-  }
   if (printBtn) {
     printBtn.addEventListener('click', () => printSummaryTable());
   }
@@ -2256,6 +2927,36 @@ function renderDraftItemsRow(op, colspan = 8) {
     '</td></tr>';
 }
 
+function updateRouteTableScrollState() {
+  const wrapper = document.getElementById('route-table-wrapper');
+  if (!wrapper) return;
+  wrapper.style.removeProperty('--route-table-max-height');
+  wrapper.classList.remove('route-table-scrollable');
+}
+
+function scrollRouteAreaToLatest() {
+  const wrapper = document.getElementById('route-table-wrapper');
+  const modalBody = document.querySelector('#card-modal .modal-body');
+  if (!wrapper || !modalBody) return;
+  const lastRow = wrapper.querySelector('tbody tr:last-child');
+  if (!lastRow) {
+    modalBody.scrollTop = modalBody.scrollHeight;
+    return;
+  }
+  const addPanel = document.querySelector('#route-editor .route-add-panel');
+  const bodyRect = modalBody.getBoundingClientRect();
+  const rowRect = lastRow.getBoundingClientRect();
+  const stickyBottomOffset = addPanel ? addPanel.getBoundingClientRect().height : 0;
+  const visibleBottom = bodyRect.bottom - stickyBottomOffset - 12;
+  const visibleTop = bodyRect.top + 12;
+
+  if (rowRect.bottom > visibleBottom) {
+    modalBody.scrollTop += rowRect.bottom - visibleBottom;
+  } else if (rowRect.top < visibleTop) {
+    modalBody.scrollTop += rowRect.top - visibleTop;
+  }
+}
+
 function renderRouteTableDraft() {
   const wrapper = document.getElementById('route-table-wrapper');
   if (!wrapper || !activeCardDraft) return;
@@ -2264,6 +2965,7 @@ function renderRouteTableDraft() {
   if (!opsArr.length) {
     wrapper.innerHTML = '<p>Маршрут пока пуст. Добавьте операции ниже.</p>';
     document.getElementById('card-status-text').textContent = cardStatusText(activeCardDraft);
+    requestAnimationFrame(() => updateRouteTableScrollState());
     return;
   }
   const sortedOps = [...opsArr].sort((a, b) => (a.order || 0) - (b.order || 0));
@@ -2374,6 +3076,11 @@ function renderRouteTableDraft() {
         recordCardLog(activeCardDraft, { action: 'Список изделий', object: opLogLabel(op), field: 'itemName', targetId: item.id, oldValue: prev, newValue: value });
       }
     });
+  });
+
+  requestAnimationFrame(() => {
+    updateRouteTableScrollState();
+    scrollRouteAreaToLatest();
   });
 }
 
@@ -2517,26 +3224,27 @@ function cardSearchScore(card, term) {
   return score;
 }
 
-function cardSearchScoreWithChildren(card, term) {
+function cardSearchScoreWithChildren(card, term, { includeArchivedChildren = false } = {}) {
   if (!term) return 0;
   const selfScore = cardSearchScore(card, term);
   if (!isGroupCard(card)) return selfScore;
-  const children = getGroupChildren(card).filter(c => !c.archived);
+  const children = getGroupChildren(card).filter(c => includeArchivedChildren || !c.archived);
   const childScore = children.reduce((max, child) => Math.max(max, cardSearchScore(child, term)), 0);
   return Math.max(selfScore, childScore);
 }
 
-function buildWorkorderCardDetails(card, { opened = false, allowArchive = true, showLog = true } = {}) {
+function buildWorkorderCardDetails(card, { opened = false, allowArchive = true, showLog = true, readonly = false } = {}) {
   const stateBadge = renderCardStateBadge(card);
   const missingBadge = cardHasMissingExecutors(card)
     ? '<span class="status-pill status-pill-missing-executor" title="Есть операции без исполнителя">Нет исполнителя</span>'
     : '';
-  const canArchive = allowArchive && card.status === 'DONE';
+  const canArchive = allowArchive && card.status === 'DONE' && !readonly;
   const filesCount = (card.attachments || []).length;
   const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
-  const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
-  const logButton = showLog ? ' <button type="button" class="btn-small btn-secondary log-btn" data-log-card="' + card.id + '">Log</button>' : '';
-  const nameLabel = (card.groupId ? '<span class="group-marker">(Г)</span> ' : '') + escapeHtml(card.name || card.id);
+  const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-allow-view="true" data-card-id="' + card.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
+  const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-card-id="' + card.id + '" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
+  const logButton = showLog ? ' <button type="button" class="btn-small btn-secondary log-btn" data-allow-view="true" data-log-card="' + card.id + '">Log</button>' : '';
+  const nameLabel = formatCardNameWithGroupPosition(card);
 
   let html = '<details class="wo-card" data-card-id="' + card.id + '"' + (opened ? ' open' : '') + '>' +
     '<summary>' +
@@ -2545,7 +3253,7 @@ function buildWorkorderCardDetails(card, { opened = false, allowArchive = true, 
     '<strong>' + nameLabel + '</strong>' +
     ' <span class="summary-sub">' +
     (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') + contractText +
-    filesButton + logButton +
+    barcodeButton + filesButton + logButton +
     '</span>' +
     '</div>' +
     '<div class="summary-actions">' +
@@ -2556,9 +3264,133 @@ function buildWorkorderCardDetails(card, { opened = false, allowArchive = true, 
     '</summary>';
 
   html += buildCardInfoBlock(card);
-  html += buildOperationsTable(card, { readonly: false, showQuantityColumn: false });
+  html += buildOperationsTable(card, { readonly, showQuantityColumn: false, allowActions: !readonly });
   html += '</details>';
   return html;
+}
+
+function buildWorkspaceCardDetails(card, { opened = true, readonly = false } = {}) {
+  const stateBadge = renderCardStateBadge(card);
+  const filesCount = (card.attachments || []).length;
+  const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
+  const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-allow-view="true" data-card-id="' + card.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
+  const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
+  const nameLabel = formatCardNameWithGroupPosition(card);
+
+  let html = '<details class="wo-card workspace-card" data-card-id="' + card.id + '"' + (opened ? ' open' : '') + '>' +
+    '<summary>' +
+    '<div class="summary-line">' +
+    '<div class="summary-text">' +
+    '<strong>' + nameLabel + '</strong>' +
+    ' <span class="summary-sub">' +
+    (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') + contractText +
+    barcodeButton + filesButton +
+    '</span>' +
+    '</div>' +
+    '<div class="summary-actions">' + stateBadge + '</div>' +
+    '</div>' +
+    '</summary>';
+
+  html += buildCardInfoBlock(card);
+  const restrictToUser = currentUser && currentUser.permissions && currentUser.permissions.worker;
+  html += buildOperationsTable(card, { readonly, showQuantityColumn: false, lockExecutors: true, lockQuantities: true, allowActions: !readonly, restrictToUser });
+  html += '</details>';
+  return html;
+}
+
+function buildWorkspaceGroupDetails(group) {
+  const children = getGroupChildren(group).filter(c => !c.archived);
+  const stateBadge = renderCardStateBadge(group);
+  const contractText = group.contractNumber ? ' (Договор: ' + escapeHtml(group.contractNumber) + ')' : '';
+  const filesCount = (group.attachments || []).length;
+  const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + group.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
+  const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-card-id="' + group.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
+
+  const childrenHtml = children.length
+    ? children.map(child => buildWorkspaceCardDetails(child, { opened: true })).join('')
+    : '<p class="group-empty">В группе нет карт для отображения.</p>';
+
+  return '<details class="wo-card group-wo-card" data-group-id="' + group.id + '" open>' +
+    '<summary>' +
+    '<div class="summary-line">' +
+    '<div class="summary-text">' +
+    '<strong><span class="group-marker">(Г)</span>' + escapeHtml(group.name || group.id) + '</strong>' +
+    ' <span class="summary-sub">' +
+    (group.orderNo ? ' (Заказ: ' + escapeHtml(group.orderNo) + ')' : '') + contractText +
+    barcodeButton + filesButton +
+    '</span>' +
+    '</div>' +
+    '<div class="summary-actions">' + stateBadge + '</div>' +
+    '</div>' +
+    '</summary>' +
+    '<div class="group-children">' + childrenHtml + '</div>' +
+    '</details>';
+}
+
+function scrollWorkorderDetailsIntoViewIfNeeded(detailsEl) {
+  if (!detailsEl || !workorderAutoScrollEnabled || suppressWorkorderAutoscroll) return;
+
+  // Автоскролл существует только для удобного просмотра именно что раскрытой карточки/группы.
+  requestAnimationFrame(() => {
+    if (suppressWorkorderAutoscroll) return;
+    const rect = detailsEl.getBoundingClientRect();
+    const header = document.querySelector('header');
+    const headerOffset = header ? header.getBoundingClientRect().height : 0;
+    const offset = headerOffset + 16;
+
+    const needsScrollDown = rect.bottom > window.innerHeight;
+    const needsScrollUp = rect.top < offset;
+    if (!needsScrollDown && !needsScrollUp) return;
+    const targetTop = window.scrollY + rect.top - offset;
+
+    window.scrollTo({
+      top: targetTop,
+      behavior: 'smooth',
+    });
+  });
+}
+
+function markWorkorderToggleState(detail) {
+  detail.dataset.wasOpen = detail.open ? 'true' : 'false';
+}
+
+function shouldScrollAfterWorkorderToggle(detail) {
+  const wasOpen = detail.dataset.wasOpen === 'true';
+  const nowOpen = detail.open;
+  detail.dataset.wasOpen = nowOpen ? 'true' : 'false';
+  // Скроллим только при переходе «было закрыто → стало открыто».
+  return nowOpen && !wasOpen;
+}
+
+function findWorkorderDetail({ cardId = null, groupId = null } = {}) {
+  if (cardId) {
+    return document.querySelector('.wo-card[data-card-id="' + cardId + '"]');
+  }
+  if (groupId) {
+    return document.querySelector('.wo-card[data-group-id="' + groupId + '"]');
+  }
+  return null;
+}
+
+function withWorkorderScrollLock(cb, { anchorCardId = null, anchorGroupId = null } = {}) {
+  const anchorEl = anchorCardId || anchorGroupId ? findWorkorderDetail({ cardId: anchorCardId, groupId: anchorGroupId }) : null;
+  const anchorTop = anchorEl ? anchorEl.getBoundingClientRect().top : null;
+  const prevX = window.scrollX;
+  const prevY = window.scrollY;
+  cb();
+  if (!suppressWorkorderAutoscroll) return;
+  requestAnimationFrame(() => {
+    if (anchorTop != null) {
+      const freshAnchor = findWorkorderDetail({ cardId: anchorCardId, groupId: anchorGroupId });
+      if (freshAnchor) {
+        const newTop = freshAnchor.getBoundingClientRect().top;
+        const delta = newTop - anchorTop;
+        window.scrollTo({ left: prevX, top: window.scrollY + delta });
+        return;
+      }
+    }
+    window.scrollTo({ left: prevX, top: prevY });
+  });
 }
 
 function renderExecutorCell(op, card, { readonly = false } = {}) {
@@ -2576,14 +3408,14 @@ function renderExecutorCell(op, card, { readonly = false } = {}) {
   const cardId = card ? card.id : '';
   let html = '<div class="executor-cell" data-card-id="' + cardId + '" data-op-id="' + op.id + '">';
   html += '<div class="executor-row primary">' +
-    '<input type="text" class="executor-main-input" data-card-id="' + cardId + '" data-op-id="' + op.id + '" value="' + escapeHtml(op.executor || '') + '" placeholder="Исполнитель" />' +
+    '<input type="text" list="' + USER_DATALIST_ID + '" class="executor-main-input" data-card-id="' + cardId + '" data-op-id="' + op.id + '" value="' + escapeHtml(op.executor || '') + '" placeholder="Исполнитель" />' +
     (extras.length < 2 ? '<button type="button" class="icon-btn add-executor-btn" data-card-id="' + cardId + '" data-op-id="' + op.id + '">+</button>' : '') +
     '</div>';
 
   extras.forEach((name, idx) => {
     const canAddMore = extras.length < 2 && idx === extras.length - 1;
     html += '<div class="executor-row extra" data-extra-index="' + idx + '">' +
-      '<input type="text" class="additional-executor-input" data-card-id="' + cardId + '" data-op-id="' + op.id + '" data-extra-index="' + idx + '" value="' + escapeHtml(name || '') + '" placeholder="Доп. исполнитель" />' +
+      '<input type="text" list="' + USER_DATALIST_ID + '" class="additional-executor-input" data-card-id="' + cardId + '" data-op-id="' + op.id + '" data-extra-index="' + idx + '" value="' + escapeHtml(name || '') + '" placeholder="Доп. исполнитель" />' +
       (canAddMore ? '<button type="button" class="icon-btn add-executor-btn" data-card-id="' + cardId + '" data-op-id="' + op.id + '">+</button>' : '') +
       '<button type="button" class="icon-btn remove-executor-btn" data-card-id="' + cardId + '" data-op-id="' + op.id + '" data-extra-index="' + idx + '">-</button>' +
       '</div>';
@@ -2593,15 +3425,16 @@ function renderExecutorCell(op, card, { readonly = false } = {}) {
   return html;
 }
 
-function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = false, showQuantityColumn = true } = {}) {
+function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = false, showQuantityColumn = true, lockExecutors = false, lockQuantities = false, allowActions = !readonly, restrictToUser = false } = {}) {
   const opsSorted = [...(card.operations || [])].sort((a, b) => (a.order || 0) - (b.order || 0));
-  const baseColumns = readonly ? 9 : 10;
+  const hasActions = allowActions && !readonly;
+  const baseColumns = hasActions ? 10 : 9;
   const totalColumns = baseColumns + (showQuantityColumn ? 1 : 0);
   let html = '<table><thead><tr>' +
     '<th>Порядок</th><th>Участок</th><th>Код операции</th><th>Операция</th>' +
     (showQuantityColumn ? '<th>Количество изделий</th>' : '') +
     '<th>Исполнитель</th><th>План (мин)</th><th>Статус</th><th>Текущее / факт. время</th>' +
-    (readonly ? '' : '<th>Действия</th>') +
+    (hasActions ? '<th>Действия</th>' : '') +
     '<th>Комментарии</th>' +
     '</tr></thead><tbody>';
 
@@ -2619,9 +3452,14 @@ function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = fa
       timeCell = formatSecondsToHMS(seconds);
     }
 
+    const userName = (currentUser && currentUser.name ? currentUser.name.toLowerCase() : '').trim();
+    const matchesUser = userName && ((op.executor || '').toLowerCase() === userName || (op.additionalExecutors || []).map(v => (v || '').toLowerCase()).includes(userName));
     let actionsHtml = '';
-    if (!readonly) {
-      if (op.status === 'NOT_STARTED' || !op.status) {
+    if (hasActions) {
+      const allowed = !restrictToUser || matchesUser;
+      if (!allowed) {
+        actionsHtml = '<span class="hint">Доступно только исполнителю</span>';
+      } else if (op.status === 'NOT_STARTED' || !op.status) {
         actionsHtml = '<button class="btn-primary" data-action="start" data-card-id="' + card.id + '" data-op-id="' + op.id + '">Начать</button>';
       } else if (op.status === 'IN_PROGRESS') {
         actionsHtml =
@@ -2641,17 +3479,18 @@ function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = fa
       ? '<div class="comment-readonly">' + escapeHtml(op.comment || '') + '</div>'
       : '<textarea class="comment-input" data-card-id="' + card.id + '" data-op-id="' + op.id + '" maxlength="40" rows="1" placeholder="Комментарий">' + escapeHtml(op.comment || '') + '</textarea>';
 
-    const actionsCell = readonly
-      ? ''
-      : '<td><div class="table-actions">' + actionsHtml + '</div></td>';
+    const actionsCell = hasActions
+      ? '<td><div class="table-actions">' + actionsHtml + '</div></td>'
+      : '';
 
-    html += '<tr data-row-id="' + rowId + '">' +
+    const highlightClass = matchesUser ? ' class="executor-highlight"' : '';
+    html += '<tr data-row-id="' + rowId + '"' + highlightClass + '>' +
       '<td>' + (idx + 1) + '</td>' +
       '<td>' + escapeHtml(op.centerName) + '</td>' +
       '<td>' + escapeHtml(op.opCode || '') + '</td>' +
       '<td>' + renderOpName(op) + '</td>' +
       (showQuantityColumn ? '<td>' + escapeHtml(getOperationQuantity(op, card)) + '</td>' : '') +
-      '<td>' + renderExecutorCell(op, card, { readonly }) + '</td>' +
+      '<td>' + renderExecutorCell(op, card, { readonly: readonly || lockExecutors }) + '</td>' +
       '<td>' + (op.plannedMinutes || '') + '</td>' +
       '<td>' + statusBadge(op.status) + '</td>' +
       '<td>' + timeCell + '</td>' +
@@ -2659,7 +3498,7 @@ function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = fa
       '<td>' + commentCell + '</td>' +
       '</tr>';
 
-    html += renderQuantityRow(card, op, { readonly, colspan: totalColumns, blankForPrint: quantityPrintBlanks });
+    html += renderQuantityRow(card, op, { readonly: readonly || lockQuantities, colspan: totalColumns, blankForPrint: quantityPrintBlanks });
   });
 
   html += '</tbody></table>';
@@ -2773,8 +3612,103 @@ function renderItemListRow(card, op, { readonly = false, colspan = 9, blankForPr
     '</td></tr>';
 }
 
+function applyOperationAction(action, card, op, { anchorGroupId = null, useWorkorderScrollLock = true } = {}) {
+  if (!card || !op) return;
+
+  const execute = () => {
+    const prevStatus = op.status;
+    const prevElapsed = op.elapsedSeconds || 0;
+    const prevCardStatus = card.status;
+
+    if (action === 'start') {
+      const now = Date.now();
+      if (!op.firstStartedAt) op.firstStartedAt = now;
+      op.status = 'IN_PROGRESS';
+      op.startedAt = now;
+      op.lastPausedAt = null;
+      op.finishedAt = null;
+      op.actualSeconds = null;
+      op.elapsedSeconds = 0;
+    } else if (action === 'pause') {
+      if (op.status === 'IN_PROGRESS') {
+        const now = Date.now();
+        const diff = op.startedAt ? (now - op.startedAt) / 1000 : 0;
+        op.elapsedSeconds = (op.elapsedSeconds || 0) + diff;
+        op.lastPausedAt = now;
+        op.startedAt = null;
+        op.status = 'PAUSED';
+      }
+    } else if (action === 'resume') {
+      const now = Date.now();
+      if (op.status === 'DONE' && typeof op.elapsedSeconds !== 'number') {
+        op.elapsedSeconds = op.actualSeconds || 0;
+      }
+      if (!op.firstStartedAt) op.firstStartedAt = now;
+      op.status = 'IN_PROGRESS';
+      op.startedAt = now;
+      op.lastPausedAt = null;
+      op.finishedAt = null;
+    } else if (action === 'stop') {
+      const now = Date.now();
+      if (op.status === 'IN_PROGRESS') {
+        const diff = op.startedAt ? (now - op.startedAt) / 1000 : 0;
+        op.elapsedSeconds = (op.elapsedSeconds || 0) + diff;
+      }
+      const qtyTotal = getOperationQuantity(op, card);
+      if (card.useItemList) {
+        normalizeOperationItems(card, op);
+        const wrongItem = (op.items || []).find(item => {
+          const expected = item.quantity != null ? item.quantity : 1;
+          const total = toSafeCount(item.goodCount || 0) + toSafeCount(item.scrapCount || 0) + toSafeCount(item.holdCount || 0);
+          return expected > 0 && total !== expected;
+        });
+        if (wrongItem) {
+          alert('Количество по изделию "' + (wrongItem.name || 'Изделие') + '" не совпадает');
+          return;
+        }
+      } else if (qtyTotal > 0) {
+        const sum = toSafeCount(op.goodCount || 0) + toSafeCount(op.scrapCount || 0) + toSafeCount(op.holdCount || 0);
+        if (sum !== qtyTotal) {
+          alert('Количество деталей не совпадает');
+          return;
+        }
+      }
+      op.startedAt = null;
+      op.finishedAt = now;
+      op.lastPausedAt = null;
+      op.actualSeconds = op.elapsedSeconds || 0;
+      op.status = 'DONE';
+    }
+
+    recalcCardStatus(card);
+    if (prevStatus !== op.status) {
+      recordCardLog(card, { action: 'Статус операции', object: opLogLabel(op), field: 'status', targetId: op.id, oldValue: prevStatus, newValue: op.status });
+    }
+    if (prevElapsed !== op.elapsedSeconds && op.status === 'DONE') {
+      recordCardLog(card, { action: 'Факт. время', object: opLogLabel(op), field: 'elapsedSeconds', targetId: op.id, oldValue: Math.round(prevElapsed), newValue: Math.round(op.elapsedSeconds || 0) });
+    }
+    if (prevCardStatus !== card.status) {
+      recordCardLog(card, { action: 'Статус карты', object: 'Карта', field: 'status', oldValue: prevCardStatus, newValue: card.status });
+    }
+    saveData();
+    renderEverything();
+  };
+
+  suppressWorkorderAutoscroll = true;
+  try {
+    if (useWorkorderScrollLock) {
+      withWorkorderScrollLock(execute, { anchorCardId: card.id, anchorGroupId });
+    } else {
+      execute();
+    }
+  } finally {
+    suppressWorkorderAutoscroll = false;
+  }
+}
+
 function renderWorkordersTable({ collapseAll = false } = {}) {
   const wrapper = document.getElementById('workorders-table-wrapper');
+  const readonly = isTabReadonly('workorders');
   const rootCards = cards.filter(c => !c.archived && !c.groupId);
   const hasOperations = rootCards.some(card => {
     if (isGroupCard(card)) {
@@ -2831,11 +3765,13 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       const missingBadge = groupHasMissingExecutors(card)
         ? '<span class="status-pill status-pill-missing-executor" title="Есть операции без исполнителя">Нет исполнителя</span>'
         : '';
+      const groupExecutorBtn = readonly ? '' : '<button type="button" class="btn-small group-executor-btn" data-group-id="' + card.id + '"><span class="group-executor-label">Групповой<br>исполнитель</span></button>';
       const filesCount = (card.attachments || []).length;
       const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
-      const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
+      const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-card-id="' + card.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
+      const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-card-id="' + card.id + '" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
       const childrenHtml = children.length
-        ? children.map(child => buildWorkorderCardDetails(child, { opened: !collapseAll && workorderOpenCards.has(child.id), allowArchive: false })).join('')
+        ? children.map(child => buildWorkorderCardDetails(child, { opened: !collapseAll && workorderOpenCards.has(child.id), allowArchive: false, readonly })).join('')
         : '<p class="group-empty">В группе нет карт для отображения.</p>';
 
       html += '<details class="wo-card group-wo-card" data-group-id="' + card.id + '"' + (opened ? ' open' : '') + '>' +
@@ -2845,12 +3781,12 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
         '<strong><span class="group-marker">(Г)</span>' + escapeHtml(card.name || card.id) + '</strong>' +
         ' <span class="summary-sub">' +
         (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') + contractText +
-        filesButton +
+        barcodeButton + filesButton +
         '</span>' +
         '</div>' +
         '<div class="summary-actions">' +
-        (missingBadge ? missingBadge + ' ' : '') + stateBadge +
-        (card.status === 'DONE' ? ' <button type="button" class="btn-small btn-secondary archive-group-btn" data-group-id="' + card.id + '">Перенести в архив</button>' : '') +
+        groupExecutorBtn + ' ' + (missingBadge ? missingBadge + ' ' : '') + stateBadge +
+        (!readonly && card.status === 'DONE' ? ' <button type="button" class="btn-small btn-secondary archive-group-btn" data-group-id="' + card.id + '">Перенести в архив</button>' : '') +
         '</div>' +
         '</div>' +
         '</summary>' +
@@ -2858,7 +3794,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
         '</details>';
     } else if (card.operations && card.operations.length) {
       const opened = !collapseAll && workorderOpenCards.has(card.id);
-      html += buildWorkorderCardDetails(card, { opened });
+      html += buildWorkorderCardDetails(card, { opened, readonly });
     }
   });
 
@@ -2869,12 +3805,18 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
     if (detail.open && groupId) {
       workorderOpenGroups.add(groupId);
     }
+    markWorkorderToggleState(detail);
     detail.addEventListener('toggle', () => {
       if (!groupId) return;
       if (detail.open) {
         workorderOpenGroups.add(groupId);
+        if (shouldScrollAfterWorkorderToggle(detail)) {
+          // Автоскролл только после раскрытия ранее закрытой группы.
+          scrollWorkorderDetailsIntoViewIfNeeded(detail);
+        }
       } else {
         workorderOpenGroups.delete(groupId);
+        markWorkorderToggleState(detail);
       }
     });
   });
@@ -2884,13 +3826,30 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
     if (detail.open && cardId) {
       workorderOpenCards.add(cardId);
     }
+    markWorkorderToggleState(detail);
     detail.addEventListener('toggle', () => {
       if (!cardId) return;
       if (detail.open) {
         workorderOpenCards.add(cardId);
+        if (shouldScrollAfterWorkorderToggle(detail)) {
+          // Скроллим только в момент раскрытия закрытой карточки.
+          scrollWorkorderDetailsIntoViewIfNeeded(detail);
+        }
       } else {
         workorderOpenCards.delete(cardId);
+        markWorkorderToggleState(detail);
       }
+    });
+  });
+
+  wrapper.querySelectorAll('.barcode-view-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = btn.getAttribute('data-card-id');
+      const card = cards.find(c => c.id === id);
+      if (!card) return;
+      openBarcodeModal(card);
     });
   });
 
@@ -2900,6 +3859,15 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       e.stopPropagation();
       const id = btn.getAttribute('data-attach-card');
       openAttachmentsModal(id, 'live');
+    });
+  });
+
+  wrapper.querySelectorAll('.group-executor-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const groupId = btn.getAttribute('data-group-id');
+      openGroupExecutorModal(groupId);
     });
   });
 
@@ -3013,11 +3981,19 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       if (!card || !op) return;
       if (!Array.isArray(op.additionalExecutors)) op.additionalExecutors = [];
       if (op.additionalExecutors.length >= 2) return;
-      op.additionalExecutors.push('');
-      recordCardLog(card, { action: 'Доп. исполнитель', object: opLogLabel(op), field: 'additionalExecutors', targetId: op.id, oldValue: op.additionalExecutors.length - 1, newValue: op.additionalExecutors.length });
-      saveData();
-      workorderOpenCards.add(cardId);
-      renderWorkordersTable();
+      const anchorGroupId = btn.closest('.wo-card') ? btn.closest('.wo-card').getAttribute('data-group-id') : null;
+      suppressWorkorderAutoscroll = true;
+      try {
+        withWorkorderScrollLock(() => {
+          op.additionalExecutors.push('');
+          recordCardLog(card, { action: 'Доп. исполнитель', object: opLogLabel(op), field: 'additionalExecutors', targetId: op.id, oldValue: op.additionalExecutors.length - 1, newValue: op.additionalExecutors.length });
+          saveData();
+          workorderOpenCards.add(cardId);
+          renderWorkordersTable();
+        }, { anchorCardId: cardId, anchorGroupId });
+      } finally {
+        suppressWorkorderAutoscroll = false;
+      }
     });
   });
 
@@ -3030,11 +4006,19 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       const op = card ? (card.operations || []).find(o => o.id === opId) : null;
       if (!card || !op || !Array.isArray(op.additionalExecutors)) return;
       if (idx < 0 || idx >= op.additionalExecutors.length) return;
-      const removed = op.additionalExecutors.splice(idx, 1)[0];
-      recordCardLog(card, { action: 'Доп. исполнитель', object: opLogLabel(op), field: 'additionalExecutors', targetId: op.id, oldValue: removed, newValue: 'удален' });
-      saveData();
-      workorderOpenCards.add(cardId);
-      renderWorkordersTable();
+      const anchorGroupId = btn.closest('.wo-card') ? btn.closest('.wo-card').getAttribute('data-group-id') : null;
+      suppressWorkorderAutoscroll = true;
+      try {
+        withWorkorderScrollLock(() => {
+          const removed = op.additionalExecutors.splice(idx, 1)[0];
+          recordCardLog(card, { action: 'Доп. исполнитель', object: opLogLabel(op), field: 'additionalExecutors', targetId: op.id, oldValue: removed, newValue: 'удален' });
+          saveData();
+          workorderOpenCards.add(cardId);
+          renderWorkordersTable();
+        }, { anchorCardId: cardId, anchorGroupId });
+      } finally {
+        suppressWorkorderAutoscroll = false;
+      }
     });
   });
 
@@ -3121,6 +4105,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
 
   wrapper.querySelectorAll('button[data-action]').forEach(btn => {
     btn.addEventListener('click', () => {
+      if (readonly) return;
       const action = btn.getAttribute('data-action');
       const cardId = btn.getAttribute('data-card-id');
       const opId = btn.getAttribute('data-op-id');
@@ -3133,89 +4118,287 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
         workorderOpenCards.add(cardId);
       }
 
-      const prevStatus = op.status;
-      const prevElapsed = op.elapsedSeconds || 0;
-      const prevCardStatus = card.status;
-
-      if (action === 'start') {
-        const now = Date.now();
-        if (!op.firstStartedAt) op.firstStartedAt = now;
-        op.status = 'IN_PROGRESS';
-        op.startedAt = now;
-        op.lastPausedAt = null;
-        op.finishedAt = null;
-        op.actualSeconds = null;
-        op.elapsedSeconds = 0;
-      } else if (action === 'pause') {
-        if (op.status === 'IN_PROGRESS') {
-          const now = Date.now();
-          const diff = op.startedAt ? (now - op.startedAt) / 1000 : 0;
-          op.elapsedSeconds = (op.elapsedSeconds || 0) + diff;
-          op.lastPausedAt = now;
-          op.startedAt = null;
-          op.status = 'PAUSED';
-        }
-      } else if (action === 'resume') {
-        const now = Date.now();
-        if (op.status === 'DONE' && typeof op.elapsedSeconds !== 'number') {
-          op.elapsedSeconds = op.actualSeconds || 0;
-        }
-        if (!op.firstStartedAt) op.firstStartedAt = now;
-        op.status = 'IN_PROGRESS';
-        op.startedAt = now;
-        op.lastPausedAt = null;
-        op.finishedAt = null;
-      } else if (action === 'stop') {
-        const now = Date.now();
-        if (op.status === 'IN_PROGRESS') {
-          const diff = op.startedAt ? (now - op.startedAt) / 1000 : 0;
-          op.elapsedSeconds = (op.elapsedSeconds || 0) + diff;
-        }
-        const qtyTotal = getOperationQuantity(op, card);
-        if (card.useItemList) {
-          normalizeOperationItems(card, op);
-          const wrongItem = (op.items || []).find(item => {
-            const expected = item.quantity != null ? item.quantity : 1;
-            const total = toSafeCount(item.goodCount || 0) + toSafeCount(item.scrapCount || 0) + toSafeCount(item.holdCount || 0);
-            return expected > 0 && total !== expected;
-          });
-          if (wrongItem) {
-            alert('Количество по изделию "' + (wrongItem.name || 'Изделие') + '" не совпадает');
-            return;
-          }
-        } else if (qtyTotal > 0) {
-          const sum = toSafeCount(op.goodCount || 0) + toSafeCount(op.scrapCount || 0) + toSafeCount(op.holdCount || 0);
-          if (sum !== qtyTotal) {
-            alert('Количество деталей не совпадает');
-            return;
-          }
-        }
-        op.startedAt = null;
-        op.finishedAt = now;
-        op.lastPausedAt = null;
-        op.actualSeconds = op.elapsedSeconds || 0;
-        op.status = 'DONE';
-      }
-
-      recalcCardStatus(card);
-      if (prevStatus !== op.status) {
-        recordCardLog(card, { action: 'Статус операции', object: opLogLabel(op), field: 'status', targetId: op.id, oldValue: prevStatus, newValue: op.status });
-      }
-      if (prevElapsed !== op.elapsedSeconds && op.status === 'DONE') {
-        recordCardLog(card, { action: 'Факт. время', object: opLogLabel(op), field: 'elapsedSeconds', targetId: op.id, oldValue: Math.round(prevElapsed), newValue: Math.round(op.elapsedSeconds || 0) });
-      }
-      if (prevCardStatus !== card.status) {
-        recordCardLog(card, { action: 'Статус карты', object: 'Карта', field: 'status', oldValue: prevCardStatus, newValue: card.status });
-      }
-      saveData();
-      renderEverything();
+      const anchorGroupId = detail ? detail.getAttribute('data-group-id') : null;
+      applyOperationAction(action, card, op, { anchorGroupId });
     });
   });
+
+  applyReadonlyState('workorders', 'workorders');
+}
+
+function renderWorkspaceView() {
+  const wrapper = document.getElementById('workspace-results');
+  if (!wrapper) return;
+  const readonly = isTabReadonly('workspace');
+
+  const termRaw = workspaceSearchTerm.trim();
+  const digitsOnly = termRaw.replace(/\D/g, '');
+  const isWorker = currentUser && currentUser.permissions && currentUser.permissions.worker;
+  let candidates = [];
+  if (!digitsOnly) {
+    if (isWorker && currentUser) {
+      const name = (currentUser.name || '').toLowerCase();
+      candidates = cards.filter(card => {
+        if (card.archived) return false;
+        return (card.operations || []).some(op => {
+          const main = (op.executor || '').toLowerCase();
+          const extras = (op.additionalExecutors || []).map(v => (v || '').toLowerCase());
+          return main === name || extras.includes(name);
+        });
+      });
+    }
+  } else {
+    if (!/^\d{13}$/.test(digitsOnly)) {
+      wrapper.innerHTML = '<p>Введите номер карты в формате EAN-13 (13 цифр).</p>';
+      return;
+    }
+    candidates = cards.filter(card => !card.archived && (card.barcode || '') === digitsOnly);
+  }
+
+  if (!candidates.length) {
+    wrapper.innerHTML = '<p>Карты по запросу не найдены.</p>';
+    return;
+  }
+
+  let html = '';
+  candidates.forEach(card => {
+    if (card.operations && card.operations.length) {
+      html += buildWorkspaceCardDetails(card, { readonly });
+    }
+  });
+
+  if (!html) {
+    wrapper.innerHTML = '<p>Нет карт с маршрутами для отображения.</p>';
+    return;
+  }
+
+  wrapper.innerHTML = html;
+
+  wrapper.querySelectorAll('.barcode-view-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = btn.getAttribute('data-card-id');
+      const card = cards.find(c => c.id === id);
+      if (!card) return;
+      openBarcodeModal(card);
+    });
+  });
+
+  wrapper.querySelectorAll('button[data-attach-card]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = btn.getAttribute('data-attach-card');
+      openAttachmentsModal(id, 'live');
+    });
+  });
+
+  wrapper.querySelectorAll('.wo-card button[data-action]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (readonly) return;
+      const action = btn.getAttribute('data-action');
+      const cardId = btn.getAttribute('data-card-id');
+      const opId = btn.getAttribute('data-op-id');
+      const card = cards.find(c => c.id === cardId);
+      const op = card ? (card.operations || []).find(o => o.id === opId) : null;
+      if (!card || !op) return;
+
+      if (action === 'stop') {
+        openWorkspaceStopModal(card, op);
+      } else {
+        applyOperationAction(action, card, op, { useWorkorderScrollLock: false });
+      }
+    });
+  });
+
+  applyReadonlyState('workspace', 'workspace');
+}
+
+function getWorkspaceModalInputs() {
+  return [
+    document.getElementById('workspace-stop-good'),
+    document.getElementById('workspace-stop-scrap'),
+    document.getElementById('workspace-stop-hold')
+  ].filter(Boolean);
+}
+
+function setWorkspaceActiveInput(input) {
+  workspaceActiveModalInput = input || null;
+  if (workspaceActiveModalInput) {
+    workspaceActiveModalInput.focus();
+    workspaceActiveModalInput.select();
+  }
+}
+
+function focusWorkspaceNextInput() {
+  const inputs = getWorkspaceModalInputs();
+  if (!inputs.length) return;
+  const active = document.activeElement && inputs.includes(document.activeElement)
+    ? document.activeElement
+    : workspaceActiveModalInput;
+  const idx = Math.max(0, inputs.indexOf(active));
+  const next = inputs[(idx + 1) % inputs.length];
+  setWorkspaceActiveInput(next);
+}
+
+function openWorkspaceStopModal(card, op) {
+  const modal = document.getElementById('workspace-stop-modal');
+  if (!modal) return;
+  workspaceStopContext = { cardId: card.id, opId: op.id };
+  const totalEl = document.getElementById('workspace-stop-total');
+  if (totalEl) {
+    const qty = getOperationQuantity(op, card);
+    totalEl.textContent = qty === '' ? '–' : toSafeCount(qty);
+  }
+  const [goodInput, scrapInput, holdInput] = getWorkspaceModalInputs();
+  if (goodInput) goodInput.value = toSafeCount(op.goodCount || 0);
+  if (scrapInput) scrapInput.value = toSafeCount(op.scrapCount || 0);
+  if (holdInput) holdInput.value = toSafeCount(op.holdCount || 0);
+  modal.classList.remove('hidden');
+  setWorkspaceActiveInput(goodInput || scrapInput || holdInput || null);
+}
+
+function closeWorkspaceStopModal() {
+  const modal = document.getElementById('workspace-stop-modal');
+  if (modal) modal.classList.add('hidden');
+  workspaceStopContext = null;
+  workspaceActiveModalInput = null;
+}
+
+function applyWorkspaceKeypad(key) {
+  const inputs = getWorkspaceModalInputs();
+  if (!inputs.length) return;
+  const target = (document.activeElement && inputs.includes(document.activeElement))
+    ? document.activeElement
+    : workspaceActiveModalInput || inputs[0];
+  if (!target) return;
+
+  let value = target.value || '';
+  if (key === 'back') {
+    value = value.slice(0, -1);
+  } else if (key === 'clear') {
+    value = '';
+  } else if (/^\d$/.test(key)) {
+    value = value + key;
+  }
+  target.value = value.replace(/^0+(?=\d)/, '');
+  setWorkspaceActiveInput(target);
+}
+
+function submitWorkspaceStopModal() {
+  if (!workspaceStopContext) {
+    closeWorkspaceStopModal();
+    return;
+  }
+  const card = cards.find(c => c.id === workspaceStopContext.cardId);
+  const op = card ? (card.operations || []).find(o => o.id === workspaceStopContext.opId) : null;
+  if (!card || !op) {
+    closeWorkspaceStopModal();
+    return;
+  }
+
+  const inputs = getWorkspaceModalInputs();
+  const [goodInput, scrapInput, holdInput] = inputs;
+  const goodVal = toSafeCount(goodInput ? goodInput.value : 0);
+  const scrapVal = toSafeCount(scrapInput ? scrapInput.value : 0);
+  const holdVal = toSafeCount(holdInput ? holdInput.value : 0);
+
+  const prevGood = toSafeCount(op.goodCount || 0);
+  const prevScrap = toSafeCount(op.scrapCount || 0);
+  const prevHold = toSafeCount(op.holdCount || 0);
+
+  op.goodCount = goodVal;
+  op.scrapCount = scrapVal;
+  op.holdCount = holdVal;
+
+  if (prevGood !== goodVal) {
+    recordCardLog(card, { action: 'Количество деталей', object: opLogLabel(op), field: 'goodCount', targetId: op.id, oldValue: prevGood, newValue: goodVal });
+  }
+  if (prevScrap !== scrapVal) {
+    recordCardLog(card, { action: 'Количество деталей', object: opLogLabel(op), field: 'scrapCount', targetId: op.id, oldValue: prevScrap, newValue: scrapVal });
+  }
+  if (prevHold !== holdVal) {
+    recordCardLog(card, { action: 'Количество деталей', object: opLogLabel(op), field: 'holdCount', targetId: op.id, oldValue: prevHold, newValue: holdVal });
+  }
+
+  closeWorkspaceStopModal();
+  applyOperationAction('stop', card, op, { useWorkorderScrollLock: false });
+}
+
+function buildArchiveCardDetails(card, { opened = false } = {}) {
+  const stateBadge = renderCardStateBadge(card);
+  const filesCount = (card.attachments || []).length;
+  const barcodeInline = card.barcode
+    ? ' • № карты: <span class="summary-barcode">' + escapeHtml(card.barcode) + ' <button type="button" class="btn-small btn-secondary wo-barcode-btn" data-card-id="' + card.id + '">Штрихкод</button></span>'
+    : '';
+  const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
+  const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
+  const logButton = ' <button type="button" class="btn-small btn-secondary log-btn" data-log-card="' + card.id + '">Log</button>';
+  const nameLabel = formatCardNameWithGroupPosition(card, { includeArchivedSiblings: true });
+
+  let html = '<details class="wo-card" data-card-id="' + card.id + '"' + (opened ? ' open' : '') + '>' +
+    '<summary>' +
+    '<div class="summary-line">' +
+    '<div class="summary-text">' +
+    '<strong>' + nameLabel + '</strong>' +
+    ' <span class="summary-sub">' +
+    (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') + contractText +
+    barcodeInline + filesButton + logButton +
+    '</span>' +
+    '</div>' +
+    '<div class="summary-actions">' +
+    ' ' + stateBadge +
+    ' <button type="button" class="btn-small btn-secondary repeat-card-btn" data-card-id="' + card.id + '">Повторить</button>' +
+    '</div>' +
+    '</div>' +
+    '</summary>';
+
+  html += buildCardInfoBlock(card);
+  html += buildOperationsTable(card, { readonly: true });
+  html += '</details>';
+  return html;
+}
+
+function buildArchiveGroupDetails(group) {
+  const stateBadge = renderCardStateBadge(group, { includeArchivedChildren: true });
+  const filesCount = (group.attachments || []).length;
+  const contractText = group.contractNumber ? ' (Договор: ' + escapeHtml(group.contractNumber) + ')' : '';
+  const barcodeInline = group.barcode
+    ? ' • № карты: <span class="summary-barcode">' + escapeHtml(group.barcode) + ' <button type="button" class="btn-small btn-secondary wo-barcode-btn" data-card-id="' + group.id + '">Штрихкод</button></span>'
+    : '';
+  const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + group.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
+  const children = getGroupChildren(group).filter(c => c.archived);
+  const childrenHtml = children.length
+    ? children.map(child => buildArchiveCardDetails(child, { opened: false })).join('')
+    : '<p class="group-empty">В группе нет карт для отображения.</p>';
+
+  let html = '<details class="wo-card group-archive-card" data-group-id="' + group.id + '">' +
+    '<summary>' +
+    '<div class="summary-line">' +
+    '<div class="summary-text">' +
+    '<strong><span class="group-marker">(Г)</span>' + escapeHtml(group.name || group.id) + '</strong>' +
+    ' <span class="summary-sub">' +
+    (group.orderNo ? ' (Заказ: ' + escapeHtml(group.orderNo) + ')' : '') + contractText +
+    barcodeInline + filesButton +
+    '</span>' +
+    '</div>' +
+    '<div class="summary-actions">' +
+    ' ' + stateBadge +
+    ' <button type="button" class="btn-small btn-secondary repeat-card-btn" data-group-id="' + group.id + '">Повторить</button>' +
+    '</div>' +
+    '</div>' +
+    '</summary>' +
+    '<div class="group-children">' + childrenHtml + '</div>' +
+    '</details>';
+  return html;
 }
 
 function renderArchiveTable() {
   const wrapper = document.getElementById('archive-table-wrapper');
-  const archivedCards = cards.filter(c => c.archived && c.operations && c.operations.length);
+  const archivedCards = cards.filter(c => c.archived && !c.groupId);
   if (!archivedCards.length) {
     wrapper.innerHTML = '<p>В архиве пока нет карт.</p>';
     return;
@@ -3223,7 +4406,7 @@ function renderArchiveTable() {
 
   const termRaw = archiveSearchTerm.trim();
   const filteredByStatus = archivedCards.filter(card => {
-    const state = getCardProcessState(card);
+    const state = getCardProcessState(card, { includeArchivedChildren: true });
     return archiveStatusFilter === 'ALL' || state.key === archiveStatusFilter;
   });
 
@@ -3232,13 +4415,14 @@ function renderArchiveTable() {
     return;
   }
 
+  const scoreFn = (card) => cardSearchScoreWithChildren(card, termRaw, { includeArchivedChildren: true });
   let sortedCards = [...filteredByStatus];
   if (termRaw) {
-    sortedCards.sort((a, b) => cardSearchScore(b, termRaw) - cardSearchScore(a, termRaw));
+    sortedCards.sort((a, b) => scoreFn(b) - scoreFn(a));
   }
 
   const filteredBySearch = termRaw
-    ? sortedCards.filter(card => cardSearchScore(card, termRaw) > 0)
+    ? sortedCards.filter(card => scoreFn(card) > 0)
     : sortedCards;
 
   if (!filteredBySearch.length) {
@@ -3248,38 +4432,14 @@ function renderArchiveTable() {
 
   let html = '';
   filteredBySearch.forEach(card => {
-    const stateBadge = renderCardStateBadge(card);
-    const filesCount = (card.attachments || []).length;
-    const barcodeInline = card.barcode
-      ? ' • № карты: <span class="summary-barcode">' + escapeHtml(card.barcode) + ' <button type="button" class="btn-small btn-secondary wo-barcode-btn" data-card-id="' + card.id + '">Штрихкод</button></span>'
-      : '';
-    const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
-    const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
-    const logButton = ' <button type="button" class="btn-small btn-secondary log-btn" data-log-card="' + card.id + '">Log</button>';
-
-    html += '<details class="wo-card">' +
-      '<summary>' +
-      '<div class="summary-line">' +
-      '<div class="summary-text">' +
-      '<strong>' + escapeHtml(card.name || card.id) + '</strong>' +
-      ' <span class="summary-sub">' +
-      (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') + contractText +
-      barcodeInline + filesButton + logButton +
-      '</span>' +
-      '</div>' +
-      '<div class="summary-actions">' +
-      ' ' + stateBadge +
-      ' <button type="button" class="btn-small btn-secondary repeat-card-btn" data-card-id="' + card.id + '">Повторить</button>' +
-      '</div>' +
-      '</div>' +
-      '</summary>';
-
-    html += buildCardInfoBlock(card);
-    html += buildOperationsTable(card, { readonly: true });
-    html += '</details>';
+    if (isGroupCard(card)) {
+      html += buildArchiveGroupDetails(card);
+    } else if (card.operations && card.operations.length) {
+      html += buildArchiveCardDetails(card);
+    }
   });
 
-  wrapper.innerHTML = html;
+  wrapper.innerHTML = html || '<p>Нет архивных карт, удовлетворяющих фильтру.</p>';
 
   wrapper.querySelectorAll('.wo-barcode-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -3310,6 +4470,14 @@ function renderArchiveTable() {
 
   wrapper.querySelectorAll('.repeat-card-btn').forEach(btn => {
     btn.addEventListener('click', () => {
+      const groupId = btn.getAttribute('data-group-id');
+      if (groupId) {
+        const newGroup = duplicateGroup(groupId, { includeArchivedChildren: true });
+        if (newGroup) {
+          openGroupTransferModal();
+        }
+        return;
+      }
       const id = btn.getAttribute('data-card-id');
       const card = cards.find(c => c.id === id);
       if (!card) return;
@@ -3337,12 +4505,15 @@ function renderArchiveTable() {
         })),
         operations: cloneOps
       };
+      ensureCardMeta(newCard);
       recalcCardStatus(newCard);
       cards.push(newCard);
       saveData();
       renderEverything();
     });
   });
+
+  applyReadonlyState('archive', 'archive');
 }
 
 // === ТАЙМЕР ===
@@ -3370,27 +4541,44 @@ function setupNavigation() {
     btn.addEventListener('click', () => {
       const target = btn.getAttribute('data-target');
       if (!target) return;
-
-      closeCardModal();
-
-      document.querySelectorAll('main section').forEach(sec => {
-        sec.classList.remove('active');
-      });
-      const section = document.getElementById(target);
-      if (section) {
-        section.classList.add('active');
+      if (!canViewTab(target)) {
+        alert('Нет прав доступа к разделу');
+        return;
       }
 
-      navButtons.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-
-      if (target === 'workorders') {
-        renderWorkordersTable({ collapseAll: true });
-      } else if (target === 'archive') {
-        renderArchiveTable();
-      }
+      activateTab(target);
     });
   });
+}
+
+function activateTab(target) {
+  const navButtons = document.querySelectorAll('.nav-btn');
+  closeCardModal();
+
+  document.querySelectorAll('main section').forEach(sec => {
+    sec.classList.remove('active');
+  });
+  const section = document.getElementById(target);
+  if (section) {
+    section.classList.remove('hidden');
+    section.classList.add('active');
+  }
+
+  navButtons.forEach(b => b.classList.remove('active'));
+  navButtons.forEach(b => {
+    if (b.getAttribute('data-target') === target) b.classList.add('active');
+  });
+
+  if (target === 'workorders') {
+    renderWorkordersTable({ collapseAll: true });
+  } else if (target === 'archive') {
+    renderArchiveTable();
+  } else if (target === 'workspace') {
+    renderWorkspaceView();
+    focusWorkspaceSearch();
+  } else if (target === 'dashboard' && window.dashboardPager && typeof window.dashboardPager.updatePages === 'function') {
+    requestAnimationFrame(() => window.dashboardPager.updatePages());
+  }
 }
 
 function openDirectoryModal() {
@@ -3426,11 +4614,6 @@ function setupCardsTabs() {
   if (closeBtn) {
     closeBtn.addEventListener('click', () => closeDirectoryModal());
   }
-  if (modal) {
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) closeDirectoryModal();
-    });
-  }
 }
 
 function focusCardsSection() {
@@ -3443,6 +4626,14 @@ function focusCardsSection() {
     btn.classList.toggle('active', target === 'cards');
   });
   setCardsTab('list');
+}
+
+function focusWorkspaceSearch() {
+  const input = document.getElementById('workspace-search');
+  if (input) {
+    input.focus();
+    input.select();
+  }
 }
 
 function focusCardsSection() {
@@ -3545,13 +4736,6 @@ function setupForms() {
     groupCancelBtn.addEventListener('click', () => closeGroupModal());
   }
 
-  const groupModal = document.getElementById('group-modal');
-  if (groupModal) {
-    groupModal.addEventListener('click', (e) => {
-      if (e.target === groupModal) closeGroupModal();
-    });
-  }
-
   document.getElementById('route-form').addEventListener('submit', e => {
     e.preventDefault();
     if (!activeCardDraft) return;
@@ -3605,6 +4789,10 @@ function setupForms() {
     renumberAutoCodesForCard(activeCardDraft);
     document.getElementById('card-status-text').textContent = cardStatusText(activeCardDraft);
     renderRouteTableDraft();
+    const tableWrapper = document.getElementById('route-table-wrapper');
+    if (tableWrapper) {
+      tableWrapper.scrollTop = tableWrapper.scrollHeight;
+    }
     document.getElementById('route-form').reset();
     routeQtyManual = false;
     const qtyField = document.getElementById('route-qty');
@@ -3636,6 +4824,12 @@ function setupForms() {
     centerFilterInput.addEventListener('input', () => fillRouteSelectors());
   }
 
+  const cardModalBody = document.querySelector('#card-modal .modal-body');
+  if (cardModalBody) {
+    cardModalBody.addEventListener('scroll', () => updateRouteTableScrollState());
+  }
+  window.addEventListener('resize', () => updateRouteTableScrollState());
+
   document.getElementById('center-form').addEventListener('submit', e => {
     e.preventDefault();
     const name = document.getElementById('center-name').value.trim();
@@ -3665,16 +4859,9 @@ function setupForms() {
 
   const cardsSearchInput = document.getElementById('cards-search');
   const cardsSearchClear = document.getElementById('cards-search-clear');
-  const cardsContractInput = document.getElementById('cards-contract');
   if (cardsSearchInput) {
     cardsSearchInput.addEventListener('input', e => {
       cardsSearchTerm = e.target.value || '';
-      renderCardsTable();
-    });
-  }
-  if (cardsContractInput) {
-    cardsContractInput.addEventListener('input', e => {
-      cardsContractTerm = e.target.value || '';
       renderCardsTable();
     });
   }
@@ -3682,9 +4869,15 @@ function setupForms() {
     cardsSearchClear.addEventListener('click', () => {
       cardsSearchTerm = '';
       if (cardsSearchInput) cardsSearchInput.value = '';
-      cardsContractTerm = '';
-      if (cardsContractInput) cardsContractInput.value = '';
       renderCardsTable();
+    });
+  }
+
+  const workorderAutoscrollCheckbox = document.getElementById('workorder-autoscroll');
+  if (workorderAutoscrollCheckbox) {
+    workorderAutoscrollCheckbox.checked = workorderAutoScrollEnabled;
+    workorderAutoscrollCheckbox.addEventListener('change', (e) => {
+      workorderAutoScrollEnabled = !!e.target.checked;
     });
   }
 
@@ -3748,6 +4941,47 @@ function setupForms() {
       renderArchiveTable();
     });
   }
+
+  const workspaceSearchInput = document.getElementById('workspace-search');
+  const workspaceSearchSubmit = document.getElementById('workspace-search-submit');
+  const workspaceSearchClear = document.getElementById('workspace-search-clear');
+  const sanitizeWorkspaceTerm = (value = '') => (value || '').replace(/\D/g, '').slice(0, 13);
+  const triggerWorkspaceSearch = () => {
+    workspaceSearchTerm = workspaceSearchInput ? sanitizeWorkspaceTerm(workspaceSearchInput.value || '') : '';
+    if (workspaceSearchInput) {
+      workspaceSearchInput.value = workspaceSearchTerm;
+    }
+    renderWorkspaceView();
+  };
+
+  if (workspaceSearchInput) {
+    workspaceSearchInput.addEventListener('input', e => {
+      const sanitized = sanitizeWorkspaceTerm(e.target.value || '');
+      if (sanitized !== e.target.value) {
+        e.target.value = sanitized;
+      }
+      workspaceSearchTerm = sanitized;
+    });
+    workspaceSearchInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        triggerWorkspaceSearch();
+      }
+    });
+  }
+  if (workspaceSearchSubmit) {
+    workspaceSearchSubmit.addEventListener('click', triggerWorkspaceSearch);
+  }
+  if (workspaceSearchClear) {
+    workspaceSearchClear.addEventListener('click', () => {
+      workspaceSearchTerm = '';
+      if (workspaceSearchInput) {
+        workspaceSearchInput.value = '';
+        focusWorkspaceSearch();
+      }
+      renderWorkspaceView();
+    });
+  }
 }
 
 // === ОБЩИЙ РЕНДЕР ===
@@ -3764,6 +4998,30 @@ function renderEverything() {
   fillRouteSelectors();
   renderWorkordersTable();
   renderArchiveTable();
+  renderWorkspaceView();
+  renderUsersTable();
+  renderAccessLevelsTable();
+  syncReadonlyLocks();
+}
+
+function setupGroupTransferModal() {
+  const closeBtn = document.getElementById('group-transfer-close');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => closeGroupTransferModal());
+  }
+}
+
+function setupGroupExecutorModal() {
+  const createBtn = document.getElementById('group-executor-submit');
+  const cancelBtn = document.getElementById('group-executor-cancel');
+
+  if (createBtn) {
+    createBtn.addEventListener('click', () => applyGroupExecutorToGroup());
+  }
+
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', () => closeGroupExecutorModal());
+  }
 }
 
 function setupAttachmentControls() {
@@ -3775,11 +5033,6 @@ function setupAttachmentControls() {
 
   if (closeBtn) {
     closeBtn.addEventListener('click', () => closeAttachmentsModal());
-  }
-  if (modal) {
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) closeAttachmentsModal();
-    });
   }
   if (addBtn && input) {
     addBtn.addEventListener('click', () => input.click());
@@ -3796,16 +5049,288 @@ function setupAttachmentControls() {
   }
 }
 
+function setupWorkspaceModal() {
+  const modal = document.getElementById('workspace-stop-modal');
+  if (!modal) return;
+
+  const keypadButtons = modal.querySelectorAll('.workspace-keypad button[data-key]');
+  keypadButtons.forEach(btn => {
+    btn.addEventListener('click', () => applyWorkspaceKeypad(btn.getAttribute('data-key')));
+  });
+
+  const enterBtn = document.getElementById('workspace-stop-enter');
+  if (enterBtn) {
+    enterBtn.addEventListener('click', () => submitWorkspaceStopModal());
+  }
+
+  const nextBtn = document.getElementById('workspace-stop-next');
+  if (nextBtn) {
+    nextBtn.addEventListener('click', () => focusWorkspaceNextInput());
+  }
+
+  const confirmBtn = document.getElementById('workspace-stop-confirm');
+  if (confirmBtn) {
+    confirmBtn.addEventListener('click', () => submitWorkspaceStopModal());
+  }
+
+  const cancelBtn = document.getElementById('workspace-stop-cancel');
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', () => closeWorkspaceStopModal());
+  }
+
+  getWorkspaceModalInputs().forEach(input => {
+    input.addEventListener('focus', () => setWorkspaceActiveInput(input));
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submitWorkspaceStopModal();
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        focusWorkspaceNextInput();
+      }
+    });
+  });
+}
+
+// === ПОЛЬЗОВАТЕЛИ И УРОВНИ ДОСТУПА ===
+function renderUsersTable() {
+  const container = document.getElementById('users-table');
+  const createBtn = document.getElementById('user-create');
+  if (!container) return;
+  if (!canViewTab('users')) {
+    container.innerHTML = '<p>Нет прав для просмотра пользователей.</p>';
+    return;
+  }
+  if (createBtn) createBtn.disabled = !canEditTab('users');
+  renderUserDatalist();
+  let rows = '';
+  users.forEach(u => {
+    const level = accessLevels.find(l => l.id === u.accessLevelId);
+    rows += '<tr>' +
+      '<td>' + escapeHtml(u.name || '') + '</td>' +
+      '<td>' + escapeHtml(level ? level.name : 'Не задан') + '</td>' +
+      '<td>' + escapeHtml(u.status || 'active') + '</td>' +
+      '<td>' + (u.permissions && u.permissions.worker ? 'Да' : 'Нет') + '</td>' +
+      '<td class="action-col">' +
+        (canEditTab('users') ? '<button class="btn-secondary user-edit" data-id="' + u.id + '">Редактировать</button>' : '') +
+        (canEditTab('users') && u.name !== 'Abyss' ? '<button class="btn-secondary user-delete" data-id="' + u.id + '">Удалить</button>' : '') +
+      '</td>' +
+    '</tr>';
+  });
+  container.innerHTML = '<table class="security-table"><thead><tr><th>Имя</th><th>Уровень</th><th>Статус</th><th>Рабочий</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
+
+  container.querySelectorAll('.user-edit').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-id');
+      openUserModal(users.find(u => u.id === id) || null);
+    });
+  });
+  container.querySelectorAll('.user-delete').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.getAttribute('data-id');
+      if (!confirm('Удалить пользователя?')) return;
+      await fetch('/api/security/users/' + id, { method: 'DELETE', credentials: 'include' });
+      await loadSecurityData();
+      renderUsersTable();
+    });
+  });
+}
+
+function renderAccessLevelsTable() {
+  const container = document.getElementById('access-levels-table');
+  const createBtn = document.getElementById('access-level-create');
+  if (!container) return;
+  if (!canViewTab('accessLevels')) {
+    container.innerHTML = '<p>Нет прав для просмотра уровней доступа.</p>';
+    return;
+  }
+  if (createBtn) createBtn.disabled = !canEditTab('accessLevels');
+  let rows = '';
+  accessLevels.forEach(level => {
+    const perms = level.permissions || {};
+    rows += '<tr>' +
+      '<td>' + escapeHtml(level.name || '') + '</td>' +
+      '<td>' + escapeHtml(level.description || '') + '</td>' +
+      '<td>' + escapeHtml(perms.landingTab || 'dashboard') + '</td>' +
+      '<td>' + (perms.worker ? 'Да' : 'Нет') + '</td>' +
+      '<td class="action-col">' + (canEditTab('accessLevels') ? '<button class="btn-secondary access-edit" data-id="' + level.id + '">Настроить</button>' : '') + '</td>' +
+    '</tr>';
+  });
+  container.innerHTML = '<table class="security-table"><thead><tr><th>Название</th><th>Описание</th><th>Стартовая вкладка</th><th>Рабочий</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
+
+  container.querySelectorAll('.access-edit').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-id');
+      const level = accessLevels.find(l => l.id === id) || null;
+      openAccessLevelModal(level);
+    });
+  });
+}
+
+function buildPermissionGrid(level = {}) {
+  const perms = level.permissions || {};
+  return ACCESS_TAB_CONFIG.map(tab => {
+    const tabPerms = perms.tabs && perms.tabs[tab.key] ? perms.tabs[tab.key] : { view: true, edit: true };
+    return '<div class="permission-card">' +
+      '<h4>' + escapeHtml(tab.label) + '</h4>' +
+      '<label class="toggle-row"><input type="checkbox" data-perm="view" data-tab="' + tab.key + '" ' + (tabPerms.view ? 'checked' : '') + '> Просмотр</label>' +
+      '<label class="toggle-row"><input type="checkbox" data-perm="edit" data-tab="' + tab.key + '" ' + (tabPerms.edit ? 'checked' : '') + '> Изменение</label>' +
+    '</div>';
+  }).join('');
+}
+
+function openUserModal(user) {
+  const modal = document.getElementById('user-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  document.getElementById('user-id').value = user ? user.id : '';
+  document.getElementById('user-name').value = user ? user.name || '' : '';
+  document.getElementById('user-password').value = '';
+  document.getElementById('user-status').value = user ? (user.status || 'active') : 'active';
+  const select = document.getElementById('user-access-level');
+  if (select) {
+    select.innerHTML = accessLevels.map(l => '<option value="' + l.id + '">' + escapeHtml(l.name || '') + '</option>').join('');
+    select.value = user ? user.accessLevelId : (accessLevels[0] ? accessLevels[0].id : '');
+  }
+}
+
+function openAccessLevelModal(level) {
+  const modal = document.getElementById('access-level-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  document.getElementById('access-level-id').value = level ? level.id : '';
+  document.getElementById('access-level-name').value = level ? level.name || '' : '';
+  document.getElementById('access-level-desc').value = level ? level.description || '' : '';
+  document.getElementById('access-landing').value = level ? (level.permissions?.landingTab || 'dashboard') : 'dashboard';
+  document.getElementById('access-timeout').value = level ? (level.permissions?.inactivityTimeoutMinutes || 30) : 30;
+  document.getElementById('access-worker').checked = level ? !!level.permissions?.worker : false;
+  document.getElementById('access-permissions').innerHTML = buildPermissionGrid(level || {});
+}
+
+function renderUserDatalist() {
+  let list = document.getElementById(USER_DATALIST_ID);
+  if (!list) {
+    list = document.createElement('datalist');
+    list.id = USER_DATALIST_ID;
+    document.body.appendChild(list);
+  }
+  list.innerHTML = users.map(u => '<option value="' + escapeHtml(u.name || '') + '"></option>').join('');
+}
+
+function closeUserModal() {
+  const modal = document.getElementById('user-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function closeAccessLevelModal() {
+  const modal = document.getElementById('access-level-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
+async function saveUserFromModal() {
+  const id = document.getElementById('user-id').value;
+  const name = document.getElementById('user-name').value;
+  const password = document.getElementById('user-password').value;
+  const accessLevelId = document.getElementById('user-access-level').value;
+  const status = document.getElementById('user-status').value;
+  const errorEl = document.getElementById('user-error');
+  if (errorEl) { errorEl.textContent = ''; }
+  const payload = { name, password: password || undefined, accessLevelId, status };
+  const method = id ? 'PUT' : 'POST';
+  const url = id ? '/api/security/users/' + id : '/api/security/users';
+  const res = await fetch(url, { method, credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.error) {
+    if (errorEl) errorEl.textContent = data.error || 'Ошибка сохранения';
+    return;
+  }
+  await loadSecurityData();
+  renderUsersTable();
+  closeUserModal();
+}
+
+async function saveAccessLevelFromModal() {
+  const id = document.getElementById('access-level-id').value;
+  const name = document.getElementById('access-level-name').value;
+  const description = document.getElementById('access-level-desc').value;
+  const landingTab = document.getElementById('access-landing').value;
+  const timeout = parseInt(document.getElementById('access-timeout').value, 10) || 30;
+  const worker = document.getElementById('access-worker').checked;
+  const errorEl = document.getElementById('access-error');
+  const checkboxEls = document.querySelectorAll('#access-permissions input[type="checkbox"]');
+  const permissions = { tabs: {}, attachments: { upload: true, remove: true }, landingTab, inactivityTimeoutMinutes: timeout, worker };
+  checkboxEls.forEach(cb => {
+    const tab = cb.getAttribute('data-tab');
+    const perm = cb.getAttribute('data-perm');
+    permissions.tabs[tab] = permissions.tabs[tab] || { view: false, edit: false };
+    permissions.tabs[tab][perm] = cb.checked;
+  });
+  const payload = { id: id || undefined, name, description, permissions };
+  const res = await fetch('/api/security/access-levels', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.error) {
+    if (errorEl) errorEl.textContent = data.error || 'Ошибка сохранения';
+    return;
+  }
+  await loadSecurityData();
+  renderAccessLevelsTable();
+  closeAccessLevelModal();
+}
+
+function setupSecurityControls() {
+  const createUserBtn = document.getElementById('user-create');
+  if (createUserBtn) {
+    createUserBtn.addEventListener('click', () => openUserModal(null));
+  }
+  const createLevelBtn = document.getElementById('access-level-create');
+  if (createLevelBtn) {
+    createLevelBtn.addEventListener('click', () => openAccessLevelModal(null));
+  }
+  const userCancel = document.getElementById('user-cancel');
+  if (userCancel) userCancel.addEventListener('click', () => closeUserModal());
+  const accessCancel = document.getElementById('access-cancel');
+  if (accessCancel) accessCancel.addEventListener('click', () => closeAccessLevelModal());
+  const userForm = document.getElementById('user-form');
+  if (userForm) {
+    userForm.addEventListener('submit', async e => {
+      e.preventDefault();
+      await saveUserFromModal();
+    });
+  }
+  const levelForm = document.getElementById('access-level-form');
+  if (levelForm) {
+    levelForm.addEventListener('submit', async e => {
+      e.preventDefault();
+      await saveAccessLevelFromModal();
+    });
+  }
+  const userGenerate = document.getElementById('user-generate');
+  if (userGenerate) {
+    userGenerate.addEventListener('click', () => {
+      const pwd = generatePassword();
+      const input = document.getElementById('user-password');
+      if (input) input.value = pwd;
+    });
+  }
+  const userBarcode = document.getElementById('user-barcode');
+  if (userBarcode) {
+    userBarcode.addEventListener('click', () => {
+      const input = document.getElementById('user-password');
+      const nameInput = document.getElementById('user-name');
+      const pwd = input ? input.value : '';
+      const username = nameInput ? nameInput.value : '';
+      if (!pwd) { alert('Введите или сгенерируйте пароль'); return; }
+      openPasswordBarcode(pwd, username);
+    });
+  }
+}
+
 // === ИНИЦИАЛИЗАЦИЯ ===
 document.addEventListener('DOMContentLoaded', async () => {
   startRealtimeClock();
-  await loadData();
-  setupNavigation();
-  setupCardsTabs();
-  setupForms();
-  setupBarcodeModal();
-  setupAttachmentControls();
-  setupLogModal();
-  renderEverything();
-  setInterval(tickTimers, 1000);
+  setupAuthControls();
+  updateUserBadge();
+  hideMainApp();
+  showAuthOverlay();
+  await restoreSession();
 });

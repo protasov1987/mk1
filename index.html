@@ -7,20 +7,51 @@
   <link rel="stylesheet" href="style.css" />
 </head>
   <body>
+  <div id="login-overlay" class="auth-overlay">
+    <div id="login-modal" class="auth-modal">
+      <h2>Вход</h2>
+      <form id="login-form">
+        <input type="password" id="login-password" name="password" placeholder="Пароль" required />
+        <button type="submit" id="login-submit">Войти</button>
+        <div id="login-error" style="display:none;"></div>
+      </form>
+    </div>
+  </div>
+
+  <div id="app-root" class="hidden">
     <header>
       <div class="header-left">
         <h1>Трекер маршрутных карт ТСЗП</h1>
         <div id="realtime-clock" class="clock-display" aria-live="polite"></div>
+      </div>
+      <div class="user-panel">
+        <div class="user-badge" id="user-badge" aria-live="polite"></div>
+        <button class="btn-secondary btn-logout" id="btn-logout" type="button">Выход</button>
       </div>
       <nav>
         <button class="nav-btn active" data-target="dashboard">Дашборд</button>
         <button class="nav-btn" data-target="cards">Тех. карты</button>
         <button class="nav-btn" data-target="workorders">Трекер</button>
         <button class="nav-btn" data-target="archive">Архив</button>
+        <button class="nav-btn" data-target="workspace"><span class="nav-btn-multiline">Рабочее<br>место</span></button>
+        <button class="nav-btn hidden" data-target="users">Пользователи</button>
+        <button class="nav-btn hidden" data-target="access-levels">Уровни доступа</button>
       </nav>
     </header>
 
   <div id="server-status" class="status-banner status-info hidden" role="status" aria-live="polite"></div>
+
+  <div id="auth-overlay" class="auth-overlay hidden" role="dialog" aria-modal="true">
+    <div class="auth-modal">
+      <h2>Вход</h2>
+      <form id="auth-form">
+        <label for="auth-password">Пароль</label>
+        <input type="password" id="auth-password" name="password" autocomplete="current-password" required />
+        <div id="auth-error" class="auth-error" aria-live="assertive"></div>
+        <button type="submit">Войти</button>
+      </form>
+    </div>
+  </div>
 
   <main>
     <!-- Дашборд -->
@@ -41,13 +72,9 @@
         <h2>Технологические карты</h2>
         <div id="cards-list-panel" class="cards-tab-panel">
           <div class="flex" style="margin-bottom:8px; align-items:flex-end; flex-wrap:wrap; gap:8px;">
-            <div class="flex-col" style="flex:1 1 260px;">
-              <label for="cards-search">Поиск техкарты (№ карты, название, заказ)</label>
-              <input id="cards-search" placeholder="Введите № EAN-13, название или номер заказа" />
-            </div>
-            <div class="flex-col" style="flex:1 1 200px;">
-              <label for="cards-contract">Поиск по номеру договора</label>
-              <input id="cards-contract" placeholder="Введите номер договора" />
+            <div class="flex-col" style="flex:1 1 320px;">
+              <label for="cards-search">Поиск (EAN-13, наименование, заказ, договор)</label>
+              <input id="cards-search" placeholder="Введите № EAN-13, наименование, номер заказа или договора" />
             </div>
             <div class="flex-col" style="flex:0 0 auto;">
               <button class="btn-secondary" id="cards-search-clear">Сбросить</button>
@@ -67,7 +94,13 @@
     <!-- Трекер -->
     <section id="workorders">
       <div class="card">
-        <h2>Трекер</h2>
+        <div class="card-header-row">
+          <h2>Трекер</h2>
+          <label class="toggle-row" for="workorder-autoscroll">
+            <input type="checkbox" id="workorder-autoscroll" checked />
+            <span>Авто-прокрутка при открытии</span>
+          </label>
+        </div>
 
         <!-- Поиск -->
         <div class="flex" style="margin-bottom:8px; align-items:flex-end; flex-wrap:wrap; gap:8px;">
@@ -136,6 +169,51 @@
         <div id="archive-table-wrapper"></div>
       </div>
     </section>
+
+    <!-- Рабочее место -->
+    <section id="workspace">
+      <div class="card">
+        <h2>Рабочее место</h2>
+        <div class="workspace-search-row">
+          <label for="workspace-search" class="workspace-search-label">Поиск техкарты или группы</label>
+          <input
+            id="workspace-search"
+            class="workspace-search-input"
+            placeholder="Введите № EAN-13"
+            inputmode="numeric"
+            pattern="\d{13}"
+            maxlength="13"
+          />
+          <div class="workspace-search-actions">
+            <button class="btn-primary workspace-search-btn" id="workspace-search-submit">Ввод</button>
+            <button class="btn-secondary workspace-search-btn" id="workspace-search-clear">Удалить</button>
+          </div>
+        </div>
+        <div id="workspace-results"></div>
+      </div>
+    </section>
+
+    <!-- Пользователи -->
+    <section id="users" class="hidden">
+      <div class="card">
+        <div class="card-header-row">
+          <h2>Пользователи</h2>
+          <button class="btn-primary" id="user-create">Создать пользователя</button>
+        </div>
+        <div id="users-table"></div>
+      </div>
+    </section>
+
+    <!-- Уровни доступа -->
+    <section id="access-levels" class="hidden">
+      <div class="card">
+        <div class="card-header-row">
+          <h2>Уровни доступа</h2>
+          <button class="btn-primary" id="access-level-create">Создать уровень</button>
+        </div>
+        <div id="access-levels-table"></div>
+      </div>
+    </section>
     <div id="card-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="card-modal-title">
       <div class="modal-content card-modal-content">
         <div class="modal-header">
@@ -191,34 +269,36 @@
           <div class="card inset-card" id="route-editor">
             <h3>Маршрут выполнения операций</h3>
             <div id="route-table-wrapper"></div>
-            <h3>Добавить операцию в маршрут</h3>
-            <form id="route-form" class="flex route-form-grid" style="flex-wrap:wrap;">
-              <div class="flex-col" style="flex:1 1 140px;">
-                <label for="route-op-code">Код операции</label>
-                <input id="route-op-code" placeholder="Напишите код" />
-              </div>
-              <div class="flex-col" style="flex:2 1 200px;">
-                <label for="route-op">Операции</label>
-                <input id="route-op" list="route-op-options" placeholder="Начните вводить название или код" required />
-                <datalist id="route-op-options"></datalist>
-              </div>
-              <div class="flex-col" style="flex:2 1 200px;">
-                <label for="route-center">Участки</label>
-                <input id="route-center" list="route-center-options" placeholder="Начните вводить участок" required />
-                <datalist id="route-center-options"></datalist>
-              </div>
-              <div class="flex-col" style="flex:1 1 140px;">
-                <label for="route-qty">Количество изделий</label>
-                <input id="route-qty" type="number" min="0" />
-              </div>
-              <div class="flex-col" style="flex:1 1 120px;">
-                <label for="route-planned">Плановое время (мин)</label>
-                <input id="route-planned" type="number" min="1" value="30" required />
-              </div>
-              <div class="flex-col" style="flex:0 0 auto; align-self:flex-end;">
-                <button type="submit" class="btn-primary">Добавить</button>
-              </div>
-            </form>
+            <div class="route-add-panel">
+              <h3>Добавить операцию в маршрут</h3>
+              <form id="route-form" class="flex route-form-grid" style="flex-wrap:wrap;">
+                <div class="flex-col" style="flex:1 1 140px;">
+                  <label for="route-op-code">Код операции</label>
+                  <input id="route-op-code" placeholder="Напишите код" />
+                </div>
+                <div class="flex-col" style="flex:2 1 200px;">
+                  <label for="route-op">Операции</label>
+                  <input id="route-op" list="route-op-options" placeholder="Начните вводить название или код" required />
+                  <datalist id="route-op-options"></datalist>
+                </div>
+                <div class="flex-col" style="flex:2 1 200px;">
+                  <label for="route-center">Участки</label>
+                  <input id="route-center" list="route-center-options" placeholder="Начните вводить участок" required />
+                  <datalist id="route-center-options"></datalist>
+                </div>
+                <div class="flex-col" style="flex:1 1 140px;">
+                  <label for="route-qty">Количество изделий</label>
+                  <input id="route-qty" type="number" min="0" />
+                </div>
+                <div class="flex-col" style="flex:1 1 120px;">
+                  <label for="route-planned">Плановое время (мин)</label>
+                  <input id="route-planned" type="number" min="1" value="30" required />
+                </div>
+                <div class="flex-col" style="flex:0 0 auto; align-self:flex-end;">
+                  <button type="submit" class="btn-primary">Добавить</button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
         <div class="modal-actions card-modal-actions">
@@ -277,6 +357,83 @@
       <div class="modal-actions">
         <button type="button" id="group-create-confirm" class="btn-primary">Создать группу</button>
         <button type="button" id="group-create-cancel" class="btn-secondary">Отмена</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="group-transfer-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="group-transfer-title">
+    <div class="modal-content info-modal-content">
+      <div class="modal-header">
+        <h3 id="group-transfer-title">Перенос группы карт</h3>
+      </div>
+      <div class="modal-body">
+        <p>Группа карт перенесена в Тех. карты</p>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="group-transfer-close" class="btn-primary">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="group-executor-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="group-executor-title">
+    <div class="modal-content group-executor-modal-content">
+      <div class="modal-header">
+        <h3 id="group-executor-title">Групповой исполнитель</h3>
+      </div>
+      <div class="modal-body">
+        <p class="group-executor-warning">При создании группового исполнителя операции все текущие исполнители операции будут удалены во всех картах группы!</p>
+        <div class="flex-col">
+          <label for="group-executor-input">Групповой исполнитель операции</label>
+          <input id="group-executor-input" />
+        </div>
+        <div class="flex-col">
+          <label for="group-op-code-input">Код операции</label>
+          <input id="group-op-code-input" />
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="group-executor-submit" class="btn-primary">Создать</button>
+        <button type="button" id="group-executor-cancel" class="btn-secondary">Отмена</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="workspace-stop-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="workspace-stop-title">
+    <div class="modal-content workspace-stop-content">
+      <div class="modal-header">
+        <h3 id="workspace-stop-title">Введите количество деталей</h3>
+        <p class="workspace-stop-total" aria-live="polite">Количество изделий всего: <span id="workspace-stop-total">–</span> шт.</p>
+      </div>
+      <div class="modal-body workspace-stop-body">
+        <div class="workspace-stop-fields">
+          <label>Годные <input type="number" id="workspace-stop-good" inputmode="numeric" min="0" /></label>
+          <label>Брак <input type="number" id="workspace-stop-scrap" inputmode="numeric" min="0" /></label>
+          <label>Задержано <input type="number" id="workspace-stop-hold" inputmode="numeric" min="0" /></label>
+        </div>
+        <div class="workspace-stop-controls">
+          <div class="workspace-stop-buttons">
+            <button type="button" id="workspace-stop-enter" class="btn-primary workspace-stop-btn">Ввод</button>
+            <button type="button" id="workspace-stop-next" class="btn-secondary workspace-stop-btn">Следующее окно</button>
+          </div>
+          <div class="workspace-keypad" aria-label="Экранная клавиатура">
+            <button type="button" data-key="1">1</button>
+            <button type="button" data-key="2">2</button>
+            <button type="button" data-key="3">3</button>
+            <button type="button" data-key="4">4</button>
+            <button type="button" data-key="5">5</button>
+            <button type="button" data-key="6">6</button>
+            <button type="button" data-key="7">7</button>
+            <button type="button" data-key="8">8</button>
+            <button type="button" data-key="9">9</button>
+            <button type="button" data-key="0">0</button>
+            <button type="button" data-key="back">⌫</button>
+            <button type="button" data-key="clear">Стереть</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions workspace-stop-actions">
+        <button type="button" id="workspace-stop-confirm" class="btn-primary workspace-stop-action-btn">Подтвердить</button>
+        <button type="button" id="workspace-stop-cancel" class="btn-secondary workspace-stop-action-btn">Отмена</button>
       </div>
     </div>
   </div>
@@ -376,9 +533,14 @@
   <!-- Модальное окно для штрихкода -->
   <div id="barcode-modal" class="barcode-modal">
     <div class="barcode-modal-content">
-      <h3>Штрихкод технологической карты</h3>
-      <p style="font-size:12px; color:#6b7280; margin-top:0;">Формат EAN-13</p>
-      <canvas id="barcode-canvas"></canvas>
+      <div class="barcode-modal-header">
+        <h3 id="barcode-modal-title">Штрихкод</h3>
+        <p class="barcode-modal-hint">Формат EAN-13</p>
+      </div>
+      <div class="barcode-viewport">
+        <canvas id="barcode-canvas" class="barcode-canvas"></canvas>
+      </div>
+      <div id="barcode-modal-user" class="barcode-user-label hidden"></div>
       <div style="margin-top:8px; font-size:14px;">
         Код: <span id="barcode-modal-code"></span>
       </div>
@@ -389,6 +551,81 @@
     </div>
   </div>
 
+  <!-- Модальное окно пользователя -->
+  <div id="user-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="user-modal-title">Пользователь</h2>
+      </div>
+      <div class="modal-body">
+        <form id="user-form" class="flex-col">
+          <input type="hidden" id="user-id" />
+          <label for="user-name">Имя пользователя</label>
+          <input id="user-name" required />
+          <label for="user-password">Пароль</label>
+          <div class="password-row">
+            <input id="user-password" type="text" minlength="6" />
+            <button type="button" class="btn-secondary" id="user-generate">Сгенерировать</button>
+            <button type="button" class="btn-secondary" id="user-barcode">Печать штрихкода</button>
+          </div>
+          <label for="user-access-level">Уровень доступа</label>
+          <select id="user-access-level"></select>
+          <label for="user-status">Статус</label>
+          <select id="user-status">
+            <option value="active">Активен</option>
+            <option value="inactive">Отключён</option>
+          </select>
+          <div class="modal-actions">
+            <button type="submit" class="btn-primary">Сохранить</button>
+            <button type="button" class="btn-secondary" id="user-cancel">Отмена</button>
+          </div>
+          <div id="user-error" class="form-error" aria-live="assertive"></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модальное окно уровня доступа -->
+  <div id="access-level-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="access-level-modal-title">Уровень доступа</h2>
+      </div>
+      <div class="modal-body">
+        <form id="access-level-form" class="flex-col">
+          <input type="hidden" id="access-level-id" />
+          <label for="access-level-name">Название</label>
+          <input id="access-level-name" required />
+          <label for="access-level-desc">Описание</label>
+          <textarea id="access-level-desc"></textarea>
+          <label for="access-landing">Стартовая вкладка</label>
+          <select id="access-landing">
+            <option value="dashboard">Дашборд</option>
+            <option value="cards">Тех. карты</option>
+            <option value="workorders">Трекер</option>
+            <option value="workspace">Рабочее место</option>
+            <option value="archive">Архив</option>
+          </select>
+          <label for="access-timeout">Автовыход (минут)</label>
+          <input id="access-timeout" type="number" min="1" value="30" />
+          <label class="toggle-row" for="access-worker">
+            <input type="checkbox" id="access-worker" />
+            <span>Назначать статус «Рабочий»</span>
+          </label>
+          <div id="access-permissions"></div>
+          <div class="modal-actions">
+            <button type="submit" class="btn-primary">Сохранить</button>
+            <button type="button" class="btn-secondary" id="access-cancel">Отмена</button>
+          </div>
+          <div id="access-error" class="form-error" aria-live="assertive"></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  </div>
+
+  <script src="dashboard.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
