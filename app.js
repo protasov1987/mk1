@@ -203,6 +203,10 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
+function wrapTable(tableHtml) {
+  return '<div class="table-wrapper">' + tableHtml + '</div>';
+}
+
 function formatSecondsToHMS(sec) {
   const total = Math.max(0, Math.floor(sec));
   const h = Math.floor(total / 3600);
@@ -1633,7 +1637,7 @@ function renderDashboard() {
       emptyMessage
     });
   } else if (dashTableWrapper) {
-    dashTableWrapper.innerHTML = '<table>' + tableHeader + '<tbody>' + rowsHtml.join('') + '</tbody></table>';
+    dashTableWrapper.innerHTML = wrapTable('<table>' + tableHeader + '<tbody>' + rowsHtml.join('') + '</tbody></table>');
   }
 }
 
@@ -2292,7 +2296,7 @@ function renderAttachmentsModal() {
         '</tr>';
     });
     html += '</tbody></table>';
-    list.innerHTML = html;
+    list.innerHTML = wrapTable(html);
   }
   uploadHint.textContent = 'Допустимые форматы: pdf, doc, jpg, архив. Максимум ' + formatBytes(ATTACH_MAX_SIZE) + '.';
 
@@ -2708,7 +2712,8 @@ function buildInitialSnapshotHtml(card) {
     '<div><strong>Описание:</strong> ' + escapeHtml(snapshot.desc || '') + '</div>' +
     '</div>';
   const opsHtml = buildInitialSummaryTable(snapshot);
-  return metaHtml + opsHtml;
+  const wrappedOps = opsHtml.trim().startsWith('<table') ? wrapTable(opsHtml) : opsHtml;
+  return metaHtml + wrappedOps;
 }
 
 function renderInitialSnapshot(card) {
@@ -3532,7 +3537,7 @@ function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = fa
   });
 
   html += '</tbody></table>';
-  return html;
+  return '<div class="table-wrapper operations-table-wrapper">' + html + '</div>';
 }
 
 function formatQuantityValue(val) {
@@ -4553,11 +4558,11 @@ function tickTimers() {
     const card = row.card;
     const op = row.op;
     const rowId = card.id + '::' + op.id;
-    const span = document.querySelector('.wo-timer[data-row-id="' + rowId + '"]');
-    if (span) {
-      const elapsedSec = getOperationElapsedSeconds(op);
+    const spans = document.querySelectorAll('.wo-timer[data-row-id="' + rowId + '"]');
+    const elapsedSec = getOperationElapsedSeconds(op);
+    spans.forEach(span => {
       span.textContent = formatSecondsToHMS(elapsedSec);
-    }
+    });
   });
 
   refreshCardStatuses();

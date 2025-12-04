@@ -1144,6 +1144,24 @@ footer {
   border: 0;
 }
 
+#workorders .operations-table-wrapper .table-actions button {
+  padding: 4px 8px;
+  font-size: 12px;
+  min-height: 32px;
+  min-width: 32px;
+}
+
+#workorders .operations-table-wrapper .table-actions .btn-primary,
+#workorders .operations-table-wrapper .table-actions .btn-secondary,
+#workorders .operations-table-wrapper .table-actions .btn-danger {
+  min-height: 32px;
+}
+
+#workorders .operations-table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+}
+
 .summary-line {
   display: flex;
   align-items: center;
