@@ -12,6 +12,7 @@
         <h1>Трекер маршрутных карт ТСЗП</h1>
         <div id="realtime-clock" class="clock-display" aria-live="polite"></div>
       </div>
+      <div class="user-badge" id="user-badge" aria-live="polite"></div>
       <nav>
         <button class="nav-btn active" data-target="dashboard">Дашборд</button>
         <button class="nav-btn" data-target="cards">Тех. карты</button>
@@ -22,6 +23,18 @@
     </header>
 
   <div id="server-status" class="status-banner status-info hidden" role="status" aria-live="polite"></div>
+
+  <div id="auth-overlay" class="auth-overlay hidden" role="dialog" aria-modal="true">
+    <div class="auth-modal">
+      <h2>Вход</h2>
+      <form id="auth-form">
+        <label for="auth-password">Пароль</label>
+        <input type="password" id="auth-password" name="password" autocomplete="current-password" required />
+        <div id="auth-error" class="auth-error" aria-live="assertive"></div>
+        <button type="submit">Войти</button>
+      </form>
+    </div>
+  </div>
 
   <main>
     <!-- Дашборд -->

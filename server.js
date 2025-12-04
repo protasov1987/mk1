@@ -2,6 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
+const crypto = require('crypto');
 const { JsonDatabase, deepClone } = require('./db');
 
 const PORT = process.env.PORT || 8000;
@@ -11,9 +12,31 @@ const DATA_FILE = path.join(DATA_DIR, 'database.json');
 const MAX_BODY_SIZE = 20 * 1024 * 1024; // 20 MB to allow attachments
 const FILE_SIZE_LIMIT = 15 * 1024 * 1024; // 15 MB per attachment
 const ALLOWED_EXTENSIONS = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.zip', '.rar', '.7z'];
+const DEFAULT_ADMIN_PASSWORD = 'ssyba';
+const DEFAULT_ADMIN = { name: 'Abyss', role: 'admin' };
+const SESSION_COOKIE = 'session';
+const sessions = new Map();
+const PUBLIC_API_PATHS = new Set(['/api/login', '/api/logout', '/api/session']);
 
 function genId(prefix) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`;
+}
+
+function hashPassword(password, salt = crypto.randomBytes(16)) {
+  const hashed = crypto.pbkdf2Sync(password, salt, 310000, 32, 'sha256');
+  return { hash: hashed.toString('hex'), salt: salt.toString('hex') };
+}
+
+function verifyPassword(password, user) {
+  if (!user) return false;
+  if (user.passwordHash && user.passwordSalt) {
+    const hashed = crypto.pbkdf2Sync(password, Buffer.from(user.passwordSalt, 'hex'), 310000, 32, 'sha256');
+    return crypto.timingSafeEqual(hashed, Buffer.from(user.passwordHash, 'hex'));
+  }
+  if (typeof user.password === 'string') {
+    return user.password === password;
+  }
+  return false;
 }
 
 function computeEAN13CheckDigit(base12) {
@@ -104,6 +127,11 @@ function createRouteOpFromRefs(op, center, executor, plannedMinutes, order, opti
   };
 }
 
+function buildDefaultUser() {
+  const { hash, salt } = hashPassword(DEFAULT_ADMIN_PASSWORD);
+  return { id: genId('user'), ...DEFAULT_ADMIN, passwordHash: hash, passwordSalt: salt };
+}
+
 function buildDefaultData() {
   const centers = [
     { id: genId('wc'), name: 'Механическая обработка', desc: 'Токарные и фрезерные операции' },
@@ -140,7 +168,9 @@ function buildDefaultData() {
     }
   ];
 
-  return { cards, ops, centers };
+  const users = [buildDefaultUser()];
+
+  return { cards, ops, centers, users };
 }
 
 function sendJson(res, statusCode, data) {
@@ -323,7 +353,8 @@ function normalizeData(payload) {
   const safe = {
     cards: Array.isArray(payload.cards) ? payload.cards.map(normalizeCard) : [],
     ops: Array.isArray(payload.ops) ? payload.ops : [],
-    centers: Array.isArray(payload.centers) ? payload.centers : []
+    centers: Array.isArray(payload.centers) ? payload.centers : [],
+    users: Array.isArray(payload.users) ? payload.users : []
   };
   ensureOperationCodes(safe);
   safe.cards = safe.cards.map(card => {
@@ -362,19 +393,140 @@ function mergeSnapshots(existingData, incomingData) {
 
 const database = new JsonDatabase(DATA_FILE);
 
+function parseCookies(cookieHeader = '') {
+  return cookieHeader.split(';').reduce((acc, part) => {
+    const [key, ...rest] = part.trim().split('=');
+    if (!key) return acc;
+    acc[key] = decodeURIComponent(rest.join('='));
+    return acc;
+  }, {});
+}
+
+async function resolveUserBySession(req) {
+  const cookies = parseCookies(req.headers.cookie || '');
+  const token = cookies[SESSION_COOKIE];
+  if (!token || !sessions.has(token)) return null;
+  const session = sessions.get(token);
+  const data = await database.getData();
+  const user = (data.users || []).find(u => u.id === session.userId);
+  if (!user) {
+    sessions.delete(token);
+    return null;
+  }
+  return user;
+}
+
+async function ensureAuthenticated(req, res) {
+  const user = await resolveUserBySession(req);
+  if (!user) {
+    res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ error: 'Unauthorized' }));
+    return null;
+  }
+  return user;
+}
+
+async function ensureDefaultUser() {
+  await database.update(data => {
+    const draft = { ...deepClone(data) };
+    draft.users = Array.isArray(draft.users) ? draft.users.map(user => {
+      const next = { ...user };
+      const isAbyss = (next.name || next.username) === DEFAULT_ADMIN.name;
+      if (!next.passwordHash || !next.passwordSalt || isAbyss) {
+        const sourcePassword = isAbyss ? DEFAULT_ADMIN_PASSWORD : next.password;
+        const { hash, salt } = hashPassword(sourcePassword || DEFAULT_ADMIN_PASSWORD);
+        next.passwordHash = hash;
+        next.passwordSalt = salt;
+      }
+      delete next.password;
+      if (isAbyss && !next.role) {
+        next.role = DEFAULT_ADMIN.role;
+      }
+      return next;
+    }) : [];
+
+    if (!draft.users.length) {
+      draft.users.push(buildDefaultUser());
+    }
+    return draft;
+  });
+}
+
+async function handleAuth(req, res) {
+  if (req.method === 'POST' && req.url === '/api/login') {
+    try {
+      const raw = await parseBody(req);
+      const payload = JSON.parse(raw || '{}');
+      const password = (payload.password || '').toString();
+      const data = await database.getData();
+      const user = (data.users || []).find(u => verifyPassword(password, u));
+      if (!user) {
+        sendJson(res, 401, { error: 'Неверный пароль' });
+        return true;
+      }
+
+      const token = genId('sess');
+      sessions.set(token, { userId: user.id, createdAt: Date.now() });
+      res.writeHead(200, {
+        'Set-Cookie': `${SESSION_COOKIE}=${token}; HttpOnly; Path=/; SameSite=Lax`,
+        'Content-Type': 'application/json; charset=utf-8'
+      });
+      res.end(JSON.stringify({ status: 'ok', user: { name: user.name, role: user.role || 'user' } }));
+    } catch (err) {
+      sendJson(res, 400, { error: 'Invalid JSON' });
+    }
+    return true;
+  }
+
+  if (req.method === 'POST' && req.url === '/api/logout') {
+    const cookies = parseCookies(req.headers.cookie || '');
+    const token = cookies[SESSION_COOKIE];
+    if (token) {
+      sessions.delete(token);
+    }
+    res.writeHead(200, {
+      'Set-Cookie': `${SESSION_COOKIE}=; HttpOnly; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`,
+      'Content-Type': 'application/json; charset=utf-8'
+    });
+    res.end(JSON.stringify({ status: 'ok' }));
+    return true;
+  }
+
+  if (req.method === 'GET' && req.url === '/api/session') {
+    const user = await resolveUserBySession(req);
+    if (!user) {
+      sendJson(res, 401, { error: 'Unauthorized' });
+      return true;
+    }
+    sendJson(res, 200, { user: { name: user.name, role: user.role || 'user' } });
+    return true;
+  }
+
+  return false;
+}
+
 async function handleApi(req, res) {
-  if (req.method === 'GET' && req.url.startsWith('/api/data')) {
+  const pathname = url.parse(req.url).pathname;
+  if (!pathname.startsWith('/api/')) return false;
+  if (PUBLIC_API_PATHS.has(pathname)) return false;
+  if (!pathname.startsWith('/api/data')) return false;
+
+  const authedUser = await ensureAuthenticated(req, res);
+  if (!authedUser) return true;
+
+  if (req.method === 'GET' && pathname.startsWith('/api/data')) {
     const data = await database.getData();
     sendJson(res, 200, data);
     return true;
   }
 
-  if (req.method === 'POST' && req.url.startsWith('/api/data')) {
+  if (req.method === 'POST' && pathname.startsWith('/api/data')) {
     try {
       const raw = await parseBody(req);
       const parsed = JSON.parse(raw || '{}');
       const saved = await database.update(current => {
         const normalized = normalizeData(parsed);
+        normalized.users = current.users || [];
         return mergeSnapshots(current, normalized);
       });
       sendJson(res, 200, { status: 'ok', data: saved });
@@ -400,6 +552,12 @@ function findAttachment(data, attachmentId) {
 
 async function handleFileRoutes(req, res) {
   const parsed = url.parse(req.url, true);
+  const isFileDownload = req.method === 'GET' && parsed.pathname.startsWith('/files/');
+  const isCardFiles = parsed.pathname.startsWith('/api/cards/') && parsed.pathname.endsWith('/files');
+  if (!isFileDownload && !isCardFiles) return false;
+
+  const authedUser = await ensureAuthenticated(req, res);
+  if (!authedUser) return true;
   if (req.method === 'GET' && parsed.pathname.startsWith('/files/')) {
     const attachmentId = parsed.pathname.replace('/files/', '');
     const data = await database.getData();
@@ -491,6 +649,7 @@ async function handleFileRoutes(req, res) {
 }
 
 async function requestHandler(req, res) {
+  if (await handleAuth(req, res)) return;
   if (await handleApi(req, res)) return;
   if (await handleFileRoutes(req, res)) return;
   serveStatic(req, res);
@@ -498,6 +657,7 @@ async function requestHandler(req, res) {
 
 async function startServer() {
   await database.init(buildDefaultData);
+  await ensureDefaultUser();
   const server = http.createServer((req, res) => {
     requestHandler(req, res).catch(err => {
       // eslint-disable-next-line no-console
