@@ -61,12 +61,13 @@ function updateUserBadge() {
 }
 
 function showAuthOverlay(message = '') {
-  const overlay = document.getElementById('loginModal');
-  const errorEl = document.getElementById('auth-error');
-  const input = document.getElementById('auth-password');
+  const overlay = document.getElementById('login-overlay');
+  const errorEl = document.getElementById('login-error');
+  const input = document.getElementById('login-password');
   if (!overlay) return;
   if (errorEl) {
     errorEl.textContent = message || '';
+    errorEl.style.display = message ? 'block' : 'none';
   }
   overlay.classList.remove('hidden');
   if (input) {
@@ -76,19 +77,22 @@ function showAuthOverlay(message = '') {
 }
 
 function hideAuthOverlay() {
-  const overlay = document.getElementById('loginModal');
-  const errorEl = document.getElementById('auth-error');
+  const overlay = document.getElementById('login-overlay');
+  const errorEl = document.getElementById('login-error');
   if (overlay) overlay.classList.add('hidden');
-  if (errorEl) errorEl.textContent = '';
+  if (errorEl) {
+    errorEl.textContent = '';
+    errorEl.style.display = 'none';
+  }
 }
 
 function showMainApp() {
-  const app = document.getElementById('mainApp');
+  const app = document.getElementById('app-root');
   if (app) app.classList.remove('hidden');
 }
 
 function hideMainApp() {
-  const app = document.getElementById('mainApp');
+  const app = document.getElementById('app-root');
   if (app) app.classList.add('hidden');
 }
 
@@ -965,7 +969,8 @@ async function saveData() {
     const res = await fetch(API_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cards, ops, centers })
+      body: JSON.stringify({ cards, ops, centers }),
+      credentials: 'include'
     });
     if (res.status === 401) {
       handleUnauthorized('Сессия истекла, войдите снова');
@@ -1033,7 +1038,7 @@ function ensureDefaults() {
 
 async function loadData() {
   try {
-    const res = await fetch(API_ENDPOINT);
+    const res = await fetch(API_ENDPOINT, { credentials: 'include' });
     if (res.status === 401) {
       handleUnauthorized('Введите пароль для продолжения работы');
       throw new Error('Unauthorized');
@@ -1099,36 +1104,50 @@ async function loadData() {
 
 // === АВТОРИЗАЦИЯ ===
 async function performLogin(password) {
-  const errorEl = document.getElementById('auth-error');
+  const errorEl = document.getElementById('login-error');
   if (!password) {
-    if (errorEl) errorEl.textContent = 'Введите пароль';
+    if (errorEl) {
+      errorEl.style.display = 'block';
+      errorEl.textContent = 'Введите пароль';
+    }
     return;
   }
+
   try {
+    const formData = new FormData();
+    formData.append('password', password);
+
     const res = await fetch('/api/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password })
+      body: formData,
+      credentials: 'include'
     });
     const payload = await res.json().catch(() => ({}));
-    if (!res.ok || !payload.success) {
+    if (!payload.success) {
       const message = (payload && payload.error) ? payload.error : 'Неверный пароль';
-      if (errorEl) errorEl.textContent = message;
+      if (errorEl) {
+        errorEl.style.display = 'block';
+        errorEl.textContent = message;
+      }
       return;
     }
-    currentUser = payload.user || null;
+
+    currentUser = payload.user ? { name: payload.user } : null;
     updateUserBadge();
     hideAuthOverlay();
     showMainApp();
     await bootstrapApp();
   } catch (err) {
-    if (errorEl) errorEl.textContent = 'Ошибка входа: ' + err.message;
+    if (errorEl) {
+      errorEl.style.display = 'block';
+      errorEl.textContent = 'Ошибка входа: ' + err.message;
+    }
   }
 }
 
 async function restoreSession() {
   try {
-    const res = await fetch('/api/session');
+    const res = await fetch('/api/session', { credentials: 'include' });
     if (!res.ok) throw new Error('Unauthorized');
     const payload = await res.json();
     currentUser = payload.user || null;
@@ -1137,17 +1156,35 @@ async function restoreSession() {
     showMainApp();
     await bootstrapApp();
   } catch (err) {
-    handleUnauthorized('Введите пароль для входа');
+    showAuthOverlay('Введите пароль для входа');
   }
 }
 
 function setupAuthControls() {
-  const form = document.getElementById('auth-form');
-  const input = document.getElementById('auth-password');
-  if (!form) return;
+  const loginOverlay = document.getElementById('login-overlay');
+  const appRoot = document.getElementById('app-root');
+  const form = document.getElementById('login-form');
+  const input = document.getElementById('login-password');
+  const errorEl = document.getElementById('login-error');
+
+  if (loginOverlay) loginOverlay.classList.remove('hidden');
+  if (appRoot) appRoot.classList.add('hidden');
+
+  if (!form) {
+    console.error('login-form not found');
+    return;
+  }
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+
     const pwd = (input && input.value) ? input.value.trim() : '';
+
+    if (errorEl) {
+      errorEl.style.display = 'none';
+      errorEl.textContent = '';
+    }
+
     await performLogin(pwd);
   });
 }

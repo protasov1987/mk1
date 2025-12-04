@@ -7,19 +7,18 @@
   <link rel="stylesheet" href="style.css" />
 </head>
   <body>
-  <div id="loginModal" class="auth-overlay" role="dialog" aria-modal="true">
-    <div class="auth-modal">
+  <div id="login-overlay" class="auth-overlay">
+    <div id="login-modal" class="auth-modal">
       <h2>Вход</h2>
-      <form id="auth-form">
-        <label for="auth-password">Пароль</label>
-        <input type="password" id="auth-password" name="password" autocomplete="current-password" required />
-        <div id="auth-error" class="auth-error" aria-live="assertive"></div>
-        <button type="submit">Войти</button>
+      <form id="login-form">
+        <input type="password" id="login-password" name="password" placeholder="Пароль" required />
+        <button type="submit" id="login-submit">Войти</button>
+        <div id="login-error" style="display:none;"></div>
       </form>
     </div>
   </div>
 
-  <div id="mainApp" class="hidden">
+  <div id="app-root" class="hidden">
     <header>
       <div class="header-left">
         <h1>Трекер маршрутных карт ТСЗП</h1>

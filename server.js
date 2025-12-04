@@ -456,12 +456,34 @@ async function handleAuth(req, res) {
   if (req.method === 'POST' && req.url === '/api/login') {
     try {
       const raw = await parseBody(req);
-      const payload = JSON.parse(raw || '{}');
-      const password = (payload.password || '').toString();
+      const contentType = (req.headers['content-type'] || '').toLowerCase();
+      let password = '';
+
+      if (contentType.includes('application/json')) {
+        const payload = JSON.parse(raw || '{}');
+        password = (payload.password || '').toString();
+      } else if (contentType.includes('application/x-www-form-urlencoded')) {
+        const params = new URLSearchParams(raw || '');
+        password = (params.get('password') || '').toString();
+      } else if (contentType.includes('multipart/form-data')) {
+        const boundaryMatch = contentType.match(/boundary=([^;]+)/i);
+        const boundary = boundaryMatch ? boundaryMatch[1] : null;
+        if (boundary) {
+          const parts = raw.split(`--${boundary}`);
+          for (const part of parts) {
+            if (part.includes('name="password"')) {
+              const segment = part.split('\r\n\r\n')[1] || '';
+              password = segment.trim();
+              break;
+            }
+          }
+        }
+      }
+
       const data = await database.getData();
       const user = (data.users || []).find(u => verifyPassword(password, u));
       if (!user) {
-        sendJson(res, 401, { success: false, error: 'Wrong password' });
+        sendJson(res, 401, { success: false, error: 'Неверный пароль' });
         return true;
       }
 
@@ -471,9 +493,9 @@ async function handleAuth(req, res) {
         'Set-Cookie': `${SESSION_COOKIE}=${token}; HttpOnly; Path=/; SameSite=Lax`,
         'Content-Type': 'application/json; charset=utf-8'
       });
-      res.end(JSON.stringify({ success: true, user: { name: user.name, role: user.role || 'user' } }));
+      res.end(JSON.stringify({ success: true, user: user.name || user.username || 'Пользователь' }));
     } catch (err) {
-      sendJson(res, 400, { error: 'Invalid JSON' });
+      sendJson(res, 400, { success: false, error: 'Некорректный запрос' });
     }
     return true;
   }
