@@ -2,6 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
+const crypto = require('crypto');
 const { JsonDatabase, deepClone } = require('./db');
 
 const PORT = process.env.PORT || 8000;
@@ -11,12 +12,31 @@ const DATA_FILE = path.join(DATA_DIR, 'database.json');
 const MAX_BODY_SIZE = 20 * 1024 * 1024; // 20 MB to allow attachments
 const FILE_SIZE_LIMIT = 15 * 1024 * 1024; // 15 MB per attachment
 const ALLOWED_EXTENSIONS = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.zip', '.rar', '.7z'];
-const DEFAULT_ADMIN = { name: 'Abyss', password: 'ssyba', role: 'admin' };
+const DEFAULT_ADMIN_PASSWORD = 'ssyba';
+const DEFAULT_ADMIN = { name: 'Abyss', role: 'admin' };
 const SESSION_COOKIE = 'session';
 const sessions = new Map();
+const PUBLIC_API_PATHS = new Set(['/api/login', '/api/logout', '/api/session']);
 
 function genId(prefix) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`;
+}
+
+function hashPassword(password, salt = crypto.randomBytes(16)) {
+  const hashed = crypto.pbkdf2Sync(password, salt, 310000, 32, 'sha256');
+  return { hash: hashed.toString('hex'), salt: salt.toString('hex') };
+}
+
+function verifyPassword(password, user) {
+  if (!user) return false;
+  if (user.passwordHash && user.passwordSalt) {
+    const hashed = crypto.pbkdf2Sync(password, Buffer.from(user.passwordSalt, 'hex'), 310000, 32, 'sha256');
+    return crypto.timingSafeEqual(hashed, Buffer.from(user.passwordHash, 'hex'));
+  }
+  if (typeof user.password === 'string') {
+    return user.password === password;
+  }
+  return false;
 }
 
 function computeEAN13CheckDigit(base12) {
@@ -107,6 +127,11 @@ function createRouteOpFromRefs(op, center, executor, plannedMinutes, order, opti
   };
 }
 
+function buildDefaultUser() {
+  const { hash, salt } = hashPassword(DEFAULT_ADMIN_PASSWORD);
+  return { id: genId('user'), ...DEFAULT_ADMIN, passwordHash: hash, passwordSalt: salt };
+}
+
 function buildDefaultData() {
   const centers = [
     { id: genId('wc'), name: 'Механическая обработка', desc: 'Токарные и фрезерные операции' },
@@ -143,7 +168,7 @@ function buildDefaultData() {
     }
   ];
 
-  const users = [{ id: genId('user'), ...DEFAULT_ADMIN }];
+  const users = [buildDefaultUser()];
 
   return { cards, ops, centers, users };
 }
@@ -404,9 +429,24 @@ async function ensureAuthenticated(req, res) {
 async function ensureDefaultUser() {
   await database.update(data => {
     const draft = { ...deepClone(data) };
-    draft.users = Array.isArray(draft.users) ? draft.users : [];
+    draft.users = Array.isArray(draft.users) ? draft.users.map(user => {
+      const next = { ...user };
+      const isAbyss = (next.name || next.username) === DEFAULT_ADMIN.name;
+      if (!next.passwordHash || !next.passwordSalt || isAbyss) {
+        const sourcePassword = isAbyss ? DEFAULT_ADMIN_PASSWORD : next.password;
+        const { hash, salt } = hashPassword(sourcePassword || DEFAULT_ADMIN_PASSWORD);
+        next.passwordHash = hash;
+        next.passwordSalt = salt;
+      }
+      delete next.password;
+      if (isAbyss && !next.role) {
+        next.role = DEFAULT_ADMIN.role;
+      }
+      return next;
+    }) : [];
+
     if (!draft.users.length) {
-      draft.users.push({ id: genId('user'), ...DEFAULT_ADMIN });
+      draft.users.push(buildDefaultUser());
     }
     return draft;
   });
@@ -419,7 +459,7 @@ async function handleAuth(req, res) {
       const payload = JSON.parse(raw || '{}');
       const password = (payload.password || '').toString();
       const data = await database.getData();
-      const user = (data.users || []).find(u => u.password === password);
+      const user = (data.users || []).find(u => verifyPassword(password, u));
       if (!user) {
         sendJson(res, 401, { error: 'Неверный пароль' });
         return true;
@@ -431,7 +471,7 @@ async function handleAuth(req, res) {
         'Set-Cookie': `${SESSION_COOKIE}=${token}; HttpOnly; Path=/; SameSite=Lax`,
         'Content-Type': 'application/json; charset=utf-8'
       });
-      res.end(JSON.stringify({ status: 'ok', user: { name: user.name } }));
+      res.end(JSON.stringify({ status: 'ok', user: { name: user.name, role: user.role || 'user' } }));
     } catch (err) {
       sendJson(res, 400, { error: 'Invalid JSON' });
     }
@@ -458,7 +498,7 @@ async function handleAuth(req, res) {
       sendJson(res, 401, { error: 'Unauthorized' });
       return true;
     }
-    sendJson(res, 200, { user: { name: user.name } });
+    sendJson(res, 200, { user: { name: user.name, role: user.role || 'user' } });
     return true;
   }
 
@@ -466,16 +506,21 @@ async function handleAuth(req, res) {
 }
 
 async function handleApi(req, res) {
+  const pathname = url.parse(req.url).pathname;
+  if (!pathname.startsWith('/api/')) return false;
+  if (PUBLIC_API_PATHS.has(pathname)) return false;
+  if (!pathname.startsWith('/api/data')) return false;
+
   const authedUser = await ensureAuthenticated(req, res);
   if (!authedUser) return true;
 
-  if (req.method === 'GET' && req.url.startsWith('/api/data')) {
+  if (req.method === 'GET' && pathname.startsWith('/api/data')) {
     const data = await database.getData();
     sendJson(res, 200, data);
     return true;
   }
 
-  if (req.method === 'POST' && req.url.startsWith('/api/data')) {
+  if (req.method === 'POST' && pathname.startsWith('/api/data')) {
     try {
       const raw = await parseBody(req);
       const parsed = JSON.parse(raw || '{}');
@@ -507,6 +552,10 @@ function findAttachment(data, attachmentId) {
 
 async function handleFileRoutes(req, res) {
   const parsed = url.parse(req.url, true);
+  const isFileDownload = req.method === 'GET' && parsed.pathname.startsWith('/files/');
+  const isCardFiles = parsed.pathname.startsWith('/api/cards/') && parsed.pathname.endsWith('/files');
+  if (!isFileDownload && !isCardFiles) return false;
+
   const authedUser = await ensureAuthenticated(req, res);
   if (!authedUser) return true;
   if (req.method === 'GET' && parsed.pathname.startsWith('/files/')) {
