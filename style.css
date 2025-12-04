@@ -263,6 +263,18 @@ nav {
   font-size: 16px;
 }
 
+body.unauth header,
+body.unauth main,
+body.unauth footer,
+body.unauth nav,
+body.unauth #server-status {
+  display: none;
+}
+
+body.unauth #auth-modal {
+  display: flex;
+}
+
 .hidden {
   display: none;
 }

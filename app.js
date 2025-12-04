@@ -5040,6 +5040,7 @@ function showAuthModal(message = '') {
   if (error) error.textContent = message || '';
   if (modal) modal.classList.remove('hidden');
   if (main) main.classList.add('hidden');
+  if (document.body) document.body.classList.add('unauth');
   const input = document.getElementById('auth-password');
   if (input) input.focus();
 }
@@ -5049,6 +5050,7 @@ function hideAuthModal() {
   const main = document.querySelector('main');
   if (modal) modal.classList.add('hidden');
   if (main) main.classList.remove('hidden');
+  if (document.body) document.body.classList.remove('unauth');
 }
 
 async function logout() {
