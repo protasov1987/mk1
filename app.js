@@ -61,7 +61,7 @@ function updateUserBadge() {
 }
 
 function showAuthOverlay(message = '') {
-  const overlay = document.getElementById('auth-overlay');
+  const overlay = document.getElementById('loginModal');
   const errorEl = document.getElementById('auth-error');
   const input = document.getElementById('auth-password');
   if (!overlay) return;
@@ -76,15 +76,26 @@ function showAuthOverlay(message = '') {
 }
 
 function hideAuthOverlay() {
-  const overlay = document.getElementById('auth-overlay');
+  const overlay = document.getElementById('loginModal');
   const errorEl = document.getElementById('auth-error');
   if (overlay) overlay.classList.add('hidden');
   if (errorEl) errorEl.textContent = '';
 }
 
+function showMainApp() {
+  const app = document.getElementById('mainApp');
+  if (app) app.classList.remove('hidden');
+}
+
+function hideMainApp() {
+  const app = document.getElementById('mainApp');
+  if (app) app.classList.add('hidden');
+}
+
 function handleUnauthorized(message = 'Требуется вход') {
   currentUser = null;
   updateUserBadge();
+  hideMainApp();
   showAuthOverlay(message);
 }
 
@@ -1099,17 +1110,16 @@ async function performLogin(password) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password })
     });
-    if (res.status === 401) {
-      if (errorEl) errorEl.textContent = 'Неверный пароль';
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok || !payload.success) {
+      const message = (payload && payload.error) ? payload.error : 'Неверный пароль';
+      if (errorEl) errorEl.textContent = message;
       return;
     }
-    if (!res.ok) {
-      throw new Error('Ответ сервера ' + res.status);
-    }
-    const payload = await res.json();
     currentUser = payload.user || null;
     updateUserBadge();
     hideAuthOverlay();
+    showMainApp();
     await bootstrapApp();
   } catch (err) {
     if (errorEl) errorEl.textContent = 'Ошибка входа: ' + err.message;
@@ -1124,6 +1134,7 @@ async function restoreSession() {
     currentUser = payload.user || null;
     updateUserBadge();
     hideAuthOverlay();
+    showMainApp();
     await bootstrapApp();
   } catch (err) {
     handleUnauthorized('Введите пароль для входа');
@@ -4771,5 +4782,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   startRealtimeClock();
   setupAuthControls();
   updateUserBadge();
+  hideMainApp();
+  showAuthOverlay();
   await restoreSession();
 });

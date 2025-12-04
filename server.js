@@ -461,7 +461,7 @@ async function handleAuth(req, res) {
       const data = await database.getData();
       const user = (data.users || []).find(u => verifyPassword(password, u));
       if (!user) {
-        sendJson(res, 401, { error: 'Неверный пароль' });
+        sendJson(res, 401, { success: false, error: 'Wrong password' });
         return true;
       }
 
@@ -471,7 +471,7 @@ async function handleAuth(req, res) {
         'Set-Cookie': `${SESSION_COOKIE}=${token}; HttpOnly; Path=/; SameSite=Lax`,
         'Content-Type': 'application/json; charset=utf-8'
       });
-      res.end(JSON.stringify({ status: 'ok', user: { name: user.name, role: user.role || 'user' } }));
+      res.end(JSON.stringify({ success: true, user: { name: user.name, role: user.role || 'user' } }));
     } catch (err) {
       sendJson(res, 400, { error: 'Invalid JSON' });
     }
