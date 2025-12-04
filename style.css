@@ -1157,6 +1157,11 @@ footer {
   min-height: 32px;
 }
 
+#workorders .operations-table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+}
+
 .summary-line {
   display: flex;
   align-items: center;
