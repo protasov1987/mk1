@@ -24,13 +24,18 @@
         <h1>Трекер маршрутных карт ТСЗП</h1>
         <div id="realtime-clock" class="clock-display" aria-live="polite"></div>
       </div>
-      <div class="user-badge" id="user-badge" aria-live="polite"></div>
+      <div class="user-panel">
+        <div class="user-badge" id="user-badge" aria-live="polite"></div>
+        <button class="btn-secondary btn-logout" id="btn-logout" type="button">Выход</button>
+      </div>
       <nav>
         <button class="nav-btn active" data-target="dashboard">Дашборд</button>
         <button class="nav-btn" data-target="cards">Тех. карты</button>
         <button class="nav-btn" data-target="workorders">Трекер</button>
         <button class="nav-btn" data-target="archive">Архив</button>
         <button class="nav-btn" data-target="workspace"><span class="nav-btn-multiline">Рабочее<br>место</span></button>
+        <button class="nav-btn hidden" data-target="users">Пользователи</button>
+        <button class="nav-btn hidden" data-target="access-levels">Уровни доступа</button>
       </nav>
     </header>
 
@@ -185,6 +190,28 @@
           </div>
         </div>
         <div id="workspace-results"></div>
+      </div>
+    </section>
+
+    <!-- Пользователи -->
+    <section id="users" class="hidden">
+      <div class="card">
+        <div class="card-header-row">
+          <h2>Пользователи</h2>
+          <button class="btn-primary" id="user-create">Создать пользователя</button>
+        </div>
+        <div id="users-table"></div>
+      </div>
+    </section>
+
+    <!-- Уровни доступа -->
+    <section id="access-levels" class="hidden">
+      <div class="card">
+        <div class="card-header-row">
+          <h2>Уровни доступа</h2>
+          <button class="btn-primary" id="access-level-create">Создать уровень</button>
+        </div>
+        <div id="access-levels-table"></div>
       </div>
     </section>
     <div id="card-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="card-modal-title">
@@ -510,13 +537,88 @@
         <h3 id="barcode-modal-title">Штрихкод</h3>
         <p class="barcode-modal-hint">Формат EAN-13</p>
       </div>
-      <canvas id="barcode-canvas"></canvas>
+      <div class="barcode-viewport">
+        <canvas id="barcode-canvas" class="barcode-canvas"></canvas>
+      </div>
+      <div id="barcode-modal-user" class="barcode-user-label hidden"></div>
       <div style="margin-top:8px; font-size:14px;">
         Код: <span id="barcode-modal-code"></span>
       </div>
       <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
         <button id="btn-print-barcode" class="btn-primary">Печать</button>
         <button id="btn-close-barcode" class="btn-secondary">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модальное окно пользователя -->
+  <div id="user-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="user-modal-title">Пользователь</h2>
+      </div>
+      <div class="modal-body">
+        <form id="user-form" class="flex-col">
+          <input type="hidden" id="user-id" />
+          <label for="user-name">Имя пользователя</label>
+          <input id="user-name" required />
+          <label for="user-password">Пароль</label>
+          <div class="password-row">
+            <input id="user-password" type="text" minlength="6" />
+            <button type="button" class="btn-secondary" id="user-generate">Сгенерировать</button>
+            <button type="button" class="btn-secondary" id="user-barcode">Печать штрихкода</button>
+          </div>
+          <label for="user-access-level">Уровень доступа</label>
+          <select id="user-access-level"></select>
+          <label for="user-status">Статус</label>
+          <select id="user-status">
+            <option value="active">Активен</option>
+            <option value="inactive">Отключён</option>
+          </select>
+          <div class="modal-actions">
+            <button type="submit" class="btn-primary">Сохранить</button>
+            <button type="button" class="btn-secondary" id="user-cancel">Отмена</button>
+          </div>
+          <div id="user-error" class="form-error" aria-live="assertive"></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модальное окно уровня доступа -->
+  <div id="access-level-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="access-level-modal-title">Уровень доступа</h2>
+      </div>
+      <div class="modal-body">
+        <form id="access-level-form" class="flex-col">
+          <input type="hidden" id="access-level-id" />
+          <label for="access-level-name">Название</label>
+          <input id="access-level-name" required />
+          <label for="access-level-desc">Описание</label>
+          <textarea id="access-level-desc"></textarea>
+          <label for="access-landing">Стартовая вкладка</label>
+          <select id="access-landing">
+            <option value="dashboard">Дашборд</option>
+            <option value="cards">Тех. карты</option>
+            <option value="workorders">Трекер</option>
+            <option value="workspace">Рабочее место</option>
+            <option value="archive">Архив</option>
+          </select>
+          <label for="access-timeout">Автовыход (минут)</label>
+          <input id="access-timeout" type="number" min="1" value="30" />
+          <label class="toggle-row" for="access-worker">
+            <input type="checkbox" id="access-worker" />
+            <span>Назначать статус «Рабочий»</span>
+          </label>
+          <div id="access-permissions"></div>
+          <div class="modal-actions">
+            <button type="submit" class="btn-primary">Сохранить</button>
+            <button type="button" class="btn-secondary" id="access-cancel">Отмена</button>
+          </div>
+          <div id="access-error" class="form-error" aria-live="assertive"></div>
+        </form>
       </div>
     </div>
   </div>
