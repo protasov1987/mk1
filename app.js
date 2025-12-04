@@ -5124,17 +5124,26 @@ function setupAuthFlow() {
   showAuthModal();
 }
 
+function safeInitStep(fn, label) {
+  try {
+    fn();
+  } catch (err) {
+    console.error(`Init step failed: ${label}`, err);
+  }
+}
+
 // === ИНИЦИАЛИЗАЦИЯ ===
-  document.addEventListener('DOMContentLoaded', async () => {
-    startRealtimeClock();
-    setupNavigation();
-    setupCardsTabs();
-    setupForms();
-    setupBarcodeModal();
-    setupGroupTransferModal();
-    setupGroupExecutorModal();
-    setupAttachmentControls();
-    setupWorkspaceModal();
-    setupLogModal();
-    setupAuthFlow();
-  });
+document.addEventListener('DOMContentLoaded', async () => {
+  showAuthModal();
+  safeInitStep(startRealtimeClock, 'clock');
+  safeInitStep(setupNavigation, 'navigation');
+  safeInitStep(setupCardsTabs, 'card tabs');
+  safeInitStep(setupForms, 'forms');
+  safeInitStep(setupBarcodeModal, 'barcode modal');
+  safeInitStep(setupGroupTransferModal, 'group transfer modal');
+  safeInitStep(setupGroupExecutorModal, 'group executor modal');
+  safeInitStep(setupAttachmentControls, 'attachments');
+  safeInitStep(setupWorkspaceModal, 'workspace modal');
+  safeInitStep(setupLogModal, 'log modal');
+  safeInitStep(setupAuthFlow, 'auth flow');
+});
