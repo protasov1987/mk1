@@ -466,17 +466,9 @@ async function handleAuth(req, res) {
         const params = new URLSearchParams(raw || '');
         password = (params.get('password') || '').toString();
       } else if (contentType.includes('multipart/form-data')) {
-        const boundaryMatch = contentType.match(/boundary=([^;]+)/i);
-        const boundary = boundaryMatch ? boundaryMatch[1] : null;
-        if (boundary) {
-          const parts = raw.split(`--${boundary}`);
-          for (const part of parts) {
-            if (part.includes('name="password"')) {
-              const segment = part.split('\r\n\r\n')[1] || '';
-              password = segment.trim();
-              break;
-            }
-          }
+        const multipartMatch = raw.match(/name="password"[^\r\n]*\r\n[^\r\n]*\r\n([\s\S]*?)\r\n/);
+        if (multipartMatch && multipartMatch[1]) {
+          password = multipartMatch[1].trim();
         }
       }
 
