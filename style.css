@@ -1458,6 +1458,71 @@ footer {
   font-size: 13px;
 }
 
+.password-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.password-row input {
+  flex: 1 1 200px;
+}
+
+.form-error {
+  color: #b91c1c;
+  font-size: 14px;
+}
+
+.security-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.security-table th,
+.security-table td {
+  border: 1px solid #e5e7eb;
+  padding: 8px;
+  text-align: left;
+}
+
+.security-table th {
+  background: #f3f4f6;
+}
+
+.permission-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.permission-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fafafa;
+}
+
+.permission-card h4 {
+  margin: 0 0 8px 0;
+}
+
+.executor-highlight {
+  background: #ecfdf3;
+  border: 2px solid #a7f3d0;
+  transform: scale(1.02);
+}
+
+.executor-highlight .action-buttons button {
+  transform: scale(1.05);
+}
+
+.user-panel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
 .user-badge {
   align-self: center;
   background: #0ea5e9;
@@ -1467,6 +1532,19 @@ footer {
   font-weight: 600;
   min-width: 120px;
   text-align: center;
+}
+
+.btn-logout {
+  background: #ef4444;
+  color: #fff;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.btn-logout:hover {
+  background: #dc2626;
 }
 
 @media (max-width: 768px) {
