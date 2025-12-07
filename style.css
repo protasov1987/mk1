@@ -435,6 +435,61 @@ textarea {
   min-height: 44px;
 }
 
+.combo-field {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.combo-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d1d5db;
+  background: #f1f5f9;
+  border-radius: 6px;
+  padding: 0 10px;
+  font-size: 16px;
+  cursor: pointer;
+  min-width: 44px;
+}
+
+.combo-suggestions {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+  max-height: 220px;
+  overflow-y: auto;
+  z-index: 5;
+}
+
+.combo-suggestions.open {
+  display: block;
+}
+
+.combo-option {
+  padding: 10px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.combo-option:last-child {
+  border-bottom: none;
+}
+
+.combo-option:hover,
+.combo-option:focus {
+  background: #f8fafc;
+  outline: none;
+}
+
 textarea {
   resize: vertical;
   min-height: 60px;
@@ -1734,11 +1789,29 @@ footer {
 @media (max-width: 768px) {
   header {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: stretch;
+    gap: 8px;
   }
 
   .header-left h1 {
     font-size: 18px;
+  }
+
+  .header-left {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .clock-display {
+    display: none;
+  }
+
+  .user-panel {
+    margin-left: auto;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 8px;
   }
 
   .nav-toggle {
@@ -1810,6 +1883,14 @@ footer {
     min-width: 520px;
   }
 
+  .combo-toggle {
+    display: inline-flex;
+  }
+
+  .combo-field input {
+    flex: 1 1 auto;
+  }
+
   #card-modal .card-section {
     display: none;
   }
@@ -1826,21 +1907,21 @@ footer {
 @media (max-width: 600px) {
   header {
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: 1fr auto auto;
     grid-template-areas:
-      'brand user'
-      'clock clock'
-      'toggle toggle'
-      'nav nav';
-    row-gap: 8px;
+      'brand user toggle'
+      'nav nav nav';
+    column-gap: 8px;
+    row-gap: 6px;
     align-items: center;
   }
 
   .header-left {
     grid-area: brand;
-    display: grid;
-    grid-template-rows: auto auto;
-    row-gap: 4px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
   }
 
   .header-left h1 {
@@ -1848,19 +1929,11 @@ footer {
     line-height: 1.2;
   }
 
-  .clock-display {
-    grid-area: clock;
-    font-size: 12px;
-    padding: 2px 6px;
-    margin: 0;
-    justify-self: start;
-  }
-
   .user-panel {
     grid-area: user;
     display: inline-flex;
     flex-wrap: nowrap;
-    gap: 8px;
+    gap: 6px;
     justify-content: flex-end;
     align-items: center;
     margin-left: 0;

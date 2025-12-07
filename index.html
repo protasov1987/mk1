@@ -296,12 +296,20 @@
                   </div>
                   <div class="flex-col" style="flex:2 1 200px;">
                     <label for="route-op">Операции</label>
-                    <input id="route-op" list="route-op-options" placeholder="Начните вводить название или код" required />
+                    <div class="combo-field">
+                      <input id="route-op" list="route-op-options" placeholder="Начните вводить название или код" required />
+                      <button type="button" class="combo-toggle" data-combo-target="op" aria-label="Показать операции">▾</button>
+                      <div class="combo-suggestions" id="route-op-suggestions" role="listbox"></div>
+                    </div>
                     <datalist id="route-op-options"></datalist>
                   </div>
                   <div class="flex-col" style="flex:2 1 200px;">
                     <label for="route-center">Участки</label>
-                    <input id="route-center" list="route-center-options" placeholder="Начните вводить участок" required />
+                    <div class="combo-field">
+                      <input id="route-center" list="route-center-options" placeholder="Начните вводить участок" required />
+                      <button type="button" class="combo-toggle" data-combo-target="center" aria-label="Показать участки">▾</button>
+                      <div class="combo-suggestions" id="route-center-suggestions" role="listbox"></div>
+                    </div>
                     <datalist id="route-center-options"></datalist>
                   </div>
                   <div class="flex-col" style="flex:1 1 140px;">

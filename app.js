@@ -3208,13 +3208,9 @@ function moveRouteOpInDraft(ropId, delta) {
   renumberAutoCodesForCard(activeCardDraft);
 }
 
-function fillRouteSelectors() {
+function getFilteredRouteSources() {
   const opInput = document.getElementById('route-op');
   const centerInput = document.getElementById('route-center');
-  const opList = document.getElementById('route-op-options');
-  const centerList = document.getElementById('route-center-options');
-  if (!opList || !centerList) return;
-
   const opFilter = (opInput ? opInput.value : '').toLowerCase();
   const centerFilter = (centerInput ? centerInput.value : '').toLowerCase();
 
@@ -3231,6 +3227,58 @@ function fillRouteSelectors() {
     return name.includes(centerFilter) || desc.includes(centerFilter);
   });
 
+  return { filteredOps, filteredCenters };
+}
+
+function updateRouteCombo(kind, items, { forceOpen = false } = {}) {
+  const containerId = kind === 'center' ? 'route-center-suggestions' : 'route-op-suggestions';
+  const inputId = kind === 'center' ? 'route-center' : 'route-op';
+  const container = document.getElementById(containerId);
+  const input = document.getElementById(inputId);
+  if (!container || !input) return;
+
+  if (window.innerWidth > 768) {
+    container.classList.remove('open');
+    container.innerHTML = '';
+    return;
+  }
+
+  container.innerHTML = '';
+  if (!items || !items.length) {
+    container.classList.remove('open');
+    return;
+  }
+
+  items.forEach(item => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'combo-option';
+    btn.textContent = kind === 'center' ? (item.name || '') : formatOpLabel(item);
+    btn.addEventListener('click', () => {
+      input.value = btn.textContent;
+      container.classList.remove('open');
+      fillRouteSelectors();
+      input.focus();
+    });
+    container.appendChild(btn);
+  });
+
+  const shouldOpen = forceOpen || container.classList.contains('open');
+  container.classList.toggle('open', shouldOpen);
+}
+
+function hideRouteCombos() {
+  const containers = document.querySelectorAll('.combo-suggestions');
+  containers.forEach(el => el.classList.remove('open'));
+}
+
+function fillRouteSelectors() {
+  const opList = document.getElementById('route-op-options');
+  const centerList = document.getElementById('route-center-options');
+  if (!opList || !centerList) return;
+
+  const { filteredOps, filteredCenters } = getFilteredRouteSources();
+
   opList.innerHTML = '';
   filteredOps.forEach(o => {
     const opt = document.createElement('option');
@@ -3246,6 +3294,9 @@ function fillRouteSelectors() {
     opt.dataset.id = c.id;
     centerList.appendChild(opt);
   });
+
+  updateRouteCombo('op', filteredOps);
+  updateRouteCombo('center', filteredCenters);
 }
 
 // === СПРАВОЧНИКИ ===
@@ -4913,6 +4964,55 @@ function setupForms() {
     if (opInput) opInput.value = '';
     if (centerInput) centerInput.value = '';
     fillRouteSelectors();
+  });
+
+  const routeOpInput = document.getElementById('route-op');
+  if (routeOpInput) {
+    routeOpInput.addEventListener('input', () => fillRouteSelectors());
+    routeOpInput.addEventListener('focus', () => {
+      const { filteredOps } = getFilteredRouteSources();
+      updateRouteCombo('op', filteredOps, { forceOpen: true });
+    });
+  }
+
+  const routeCenterInput = document.getElementById('route-center');
+  if (routeCenterInput) {
+    routeCenterInput.addEventListener('input', () => fillRouteSelectors());
+    routeCenterInput.addEventListener('focus', () => {
+      const { filteredCenters } = getFilteredRouteSources();
+      updateRouteCombo('center', filteredCenters, { forceOpen: true });
+    });
+  }
+
+  const comboToggles = document.querySelectorAll('.combo-toggle');
+  comboToggles.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = btn.getAttribute('data-combo-target');
+      if (!target) return;
+      const { filteredOps, filteredCenters } = getFilteredRouteSources();
+      const items = target === 'center' ? filteredCenters : filteredOps;
+      const container = document.getElementById(target === 'center' ? 'route-center-suggestions' : 'route-op-suggestions');
+      const willOpen = !(container && container.classList.contains('open'));
+      if (willOpen) {
+        updateRouteCombo(target, items, { forceOpen: true });
+      } else {
+        hideRouteCombos();
+      }
+    });
+  });
+
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.combo-field')) {
+      hideRouteCombos();
+    }
+  });
+
+  window.addEventListener('resize', () => {
+    if (window.innerWidth > 768) {
+      hideRouteCombos();
+    } else {
+      fillRouteSelectors();
+    }
   });
 
   const routeQtyField = document.getElementById('route-qty');
