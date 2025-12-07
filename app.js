@@ -44,10 +44,16 @@ const ACCESS_TAB_CONFIG = [
   { key: 'accessLevels', label: 'Уровни доступа' }
 ];
 const USER_DATALIST_ID = 'user-combobox-options';
+const FORBIDDEN_EXECUTOR = 'abyss';
 let currentUser = null;
 let appBootstrapped = false;
 let timersStarted = false;
 let inactivityTimer = null;
+
+function sanitizeExecutorName(name = '') {
+  if ((name || '').toLowerCase() === FORBIDDEN_EXECUTOR) return '';
+  return name;
+}
 
 function setConnectionStatus(message, variant = 'info') {
   const banner = document.getElementById('server-status');
@@ -2557,12 +2563,19 @@ function applyGroupExecutorToGroup() {
   const opCodeInput = document.getElementById('group-op-code-input');
   if (!groupExecutorContext) return;
 
-  const executor = (executorInput ? executorInput.value : '').trim();
+  const rawExecutor = (executorInput ? executorInput.value : '').trim();
+  const executor = sanitizeExecutorName(rawExecutor);
   const opCodeRaw = (opCodeInput ? opCodeInput.value : '').trim();
   const group = cards.find(c => c.id === groupExecutorContext.groupId && isGroupCard(c));
 
   if (!group) {
     closeGroupExecutorModal();
+    return;
+  }
+
+  if (!executor && rawExecutor) {
+    alert('Пользователь Abyss недоступен для выбора. Выберите другого исполнителя.');
+    if (executorInput) executorInput.value = '';
     return;
   }
 
@@ -2712,6 +2725,10 @@ function buildSummaryTable(card) {
 
   opsSorted.forEach((op, idx) => {
     normalizeOperationItems(card, op);
+    op.executor = sanitizeExecutorName(op.executor || '');
+    if (Array.isArray(op.additionalExecutors)) {
+      op.additionalExecutors = op.additionalExecutors.map(name => sanitizeExecutorName(name || '')).filter(Boolean);
+    }
     const rowId = card.id + '::' + op.id;
     const elapsed = getOperationElapsedSeconds(op);
     let timeCell = '';
@@ -3467,6 +3484,7 @@ function buildWorkspaceGroupDetails(group) {
   const filesCount = (group.attachments || []).length;
   const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + group.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
   const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-card-id="' + group.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
+  const inlineActions = '<span class="summary-inline-actions workorder-inline-actions">' + barcodeButton + filesButton + '</span>';
 
   const childrenHtml = children.length
     ? children.map(child => buildWorkspaceCardDetails(child, { opened: true })).join('')
@@ -3479,7 +3497,7 @@ function buildWorkspaceGroupDetails(group) {
     '<strong><span class="group-marker">(Г)</span>' + escapeHtml(group.name || group.id) + '</strong>' +
     ' <span class="summary-sub">' +
     (group.orderNo ? ' (Заказ: ' + escapeHtml(group.orderNo) + ')' : '') + contractText +
-    barcodeButton + filesButton +
+    inlineActions +
     '</span>' +
     '</div>' +
     '<div class="summary-actions">' + stateBadge + '</div>' +
@@ -3602,6 +3620,10 @@ function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = fa
 
   opsSorted.forEach((op, idx) => {
     normalizeOperationItems(card, op);
+    op.executor = sanitizeExecutorName(op.executor || '');
+    if (Array.isArray(op.additionalExecutors)) {
+      op.additionalExecutors = op.additionalExecutors.map(name => sanitizeExecutorName(name || '')).filter(Boolean);
+    }
     const rowId = card.id + '::' + op.id;
     const elapsed = getOperationElapsedSeconds(op);
     let timeCell = '';
@@ -3932,6 +3954,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
       const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-card-id="' + card.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
       const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-card-id="' + card.id + '" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
+      const inlineActions = '<span class="summary-inline-actions workorder-inline-actions">' + barcodeButton + filesButton + '</span>';
       const childrenHtml = children.length
         ? children.map(child => buildWorkorderCardDetails(child, { opened: !collapseAll && workorderOpenCards.has(child.id), allowArchive: false, readonly })).join('')
         : '<p class="group-empty">В группе нет карт для отображения.</p>';
@@ -3943,7 +3966,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
         '<strong><span class="group-marker">(Г)</span>' + escapeHtml(card.name || card.id) + '</strong>' +
         ' <span class="summary-sub">' +
         (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') + contractText +
-        barcodeButton + filesButton +
+        inlineActions +
         '</span>' +
         '</div>' +
         '<div class="summary-actions">' +
@@ -4115,7 +4138,10 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       const card = cards.find(c => c.id === cardId);
       const op = card ? (card.operations || []).find(o => o.id === opId) : null;
       if (!op) return;
-      op.executor = (e.target.value || '').trim();
+      op.executor = sanitizeExecutorName((e.target.value || '').trim());
+      if (!op.executor && (e.target.value || '').trim()) {
+        e.target.value = '';
+      }
     });
     input.addEventListener('blur', e => {
       const cardId = input.getAttribute('data-card-id');
@@ -4123,8 +4149,13 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       const card = cards.find(c => c.id === cardId);
       const op = card ? (card.operations || []).find(o => o.id === opId) : null;
       if (!op || !card) return;
-      const value = (e.target.value || '').trim();
+      const raw = (e.target.value || '').trim();
+      const value = sanitizeExecutorName(raw);
       const prev = input.dataset.prevVal || '';
+      if (!value && raw) {
+        alert('Пользователь Abyss недоступен для выбора. Выберите другого исполнителя.');
+        e.target.value = '';
+      }
       op.executor = value;
       if (prev !== value) {
         recordCardLog(card, { action: 'Исполнитель', object: opLogLabel(op), field: 'executor', targetId: op.id, oldValue: prev, newValue: value });
@@ -4195,8 +4226,13 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       const card = cards.find(c => c.id === cardId);
       const op = card ? (card.operations || []).find(o => o.id === opId) : null;
       if (!card || !op || !Array.isArray(op.additionalExecutors)) return;
-      const value = (e.target.value || '').trim();
+      const raw = (e.target.value || '').trim();
+      const value = sanitizeExecutorName(raw);
       const prev = input.dataset.prevVal || '';
+      if (!value && raw) {
+        alert('Пользователь Abyss недоступен для выбора. Выберите другого исполнителя.');
+        e.target.value = '';
+      }
       if (idx < 0 || idx >= op.additionalExecutors.length) return;
       op.additionalExecutors[idx] = value;
       if (prev !== value) {
@@ -4968,38 +5004,25 @@ function setupForms() {
 
   const routeOpInput = document.getElementById('route-op');
   if (routeOpInput) {
-    routeOpInput.addEventListener('input', () => fillRouteSelectors());
-    routeOpInput.addEventListener('focus', () => {
+    const openOpList = () => {
       const { filteredOps } = getFilteredRouteSources();
       updateRouteCombo('op', filteredOps, { forceOpen: true });
-    });
+    };
+    routeOpInput.addEventListener('input', () => fillRouteSelectors());
+    routeOpInput.addEventListener('focus', openOpList);
+    routeOpInput.addEventListener('click', openOpList);
   }
 
   const routeCenterInput = document.getElementById('route-center');
   if (routeCenterInput) {
-    routeCenterInput.addEventListener('input', () => fillRouteSelectors());
-    routeCenterInput.addEventListener('focus', () => {
+    const openCenterList = () => {
       const { filteredCenters } = getFilteredRouteSources();
       updateRouteCombo('center', filteredCenters, { forceOpen: true });
-    });
+    };
+    routeCenterInput.addEventListener('input', () => fillRouteSelectors());
+    routeCenterInput.addEventListener('focus', openCenterList);
+    routeCenterInput.addEventListener('click', openCenterList);
   }
-
-  const comboToggles = document.querySelectorAll('.combo-toggle');
-  comboToggles.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const target = btn.getAttribute('data-combo-target');
-      if (!target) return;
-      const { filteredOps, filteredCenters } = getFilteredRouteSources();
-      const items = target === 'center' ? filteredCenters : filteredOps;
-      const container = document.getElementById(target === 'center' ? 'route-center-suggestions' : 'route-op-suggestions');
-      const willOpen = !(container && container.classList.contains('open'));
-      if (willOpen) {
-        updateRouteCombo(target, items, { forceOpen: true });
-      } else {
-        hideRouteCombos();
-      }
-    });
-  });
 
   document.addEventListener('click', e => {
     if (!e.target.closest('.combo-field')) {
@@ -5322,7 +5345,6 @@ function renderUsersTable() {
     rows += '<tr>' +
       '<td>' + escapeHtml(u.name || '') + '</td>' +
       '<td>' + escapeHtml(level ? level.name : 'Не задан') + '</td>' +
-      '<td>' + escapeHtml(u.status || 'active') + '</td>' +
       '<td>' + (u.permissions && u.permissions.worker ? 'Да' : 'Нет') + '</td>' +
       '<td class="action-col">' +
         (canEditTab('users') ? '<button class="btn-secondary user-edit" data-id="' + u.id + '">Редактировать</button>' : '') +
@@ -5330,7 +5352,7 @@ function renderUsersTable() {
       '</td>' +
     '</tr>';
   });
-  container.innerHTML = '<table class="security-table"><thead><tr><th>Имя</th><th>Уровень</th><th>Статус</th><th>Рабочий</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
+  container.innerHTML = '<table class="security-table"><thead><tr><th>Имя</th><th>Уровень</th><th>Рабочий</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
 
   container.querySelectorAll('.user-edit').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -5399,7 +5421,6 @@ function openUserModal(user) {
   document.getElementById('user-id').value = user ? user.id : '';
   document.getElementById('user-name').value = user ? user.name || '' : '';
   document.getElementById('user-password').value = '';
-  document.getElementById('user-status').value = user ? (user.status || 'active') : 'active';
   const select = document.getElementById('user-access-level');
   if (select) {
     select.innerHTML = accessLevels.map(l => '<option value="' + l.id + '">' + escapeHtml(l.name || '') + '</option>').join('');
@@ -5427,7 +5448,8 @@ function renderUserDatalist() {
     list.id = USER_DATALIST_ID;
     document.body.appendChild(list);
   }
-  list.innerHTML = users.map(u => '<option value="' + escapeHtml(u.name || '') + '"></option>').join('');
+  const filteredUsers = users.filter(u => (u.name || '').toLowerCase() !== 'abyss');
+  list.innerHTML = filteredUsers.map(u => '<option value="' + escapeHtml(u.name || '') + '"></option>').join('');
 }
 
 function closeUserModal() {
@@ -5445,10 +5467,9 @@ async function saveUserFromModal() {
   const name = document.getElementById('user-name').value;
   const password = document.getElementById('user-password').value;
   const accessLevelId = document.getElementById('user-access-level').value;
-  const status = document.getElementById('user-status').value;
   const errorEl = document.getElementById('user-error');
   if (errorEl) { errorEl.textContent = ''; }
-  const payload = { name, password: password || undefined, accessLevelId, status };
+  const payload = { name, password: password || undefined, accessLevelId, status: 'active' };
   const method = id ? 'PUT' : 'POST';
   const url = id ? '/api/security/users/' + id : '/api/security/users';
   const res = await fetch(url, { method, credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -5523,6 +5544,16 @@ function setupSecurityControls() {
       const pwd = generatePassword();
       const input = document.getElementById('user-password');
       if (input) input.value = pwd;
+    });
+  }
+  const passwordToggle = document.getElementById('user-password-visibility');
+  if (passwordToggle) {
+    passwordToggle.addEventListener('click', () => {
+      const input = document.getElementById('user-password');
+      if (!input) return;
+      const isHidden = input.getAttribute('type') === 'password';
+      input.setAttribute('type', isHidden ? 'text' : 'password');
+      passwordToggle.setAttribute('aria-label', isHidden ? 'Скрыть пароль' : 'Показать пароль');
     });
   }
   const userBarcode = document.getElementById('user-barcode');

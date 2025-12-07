@@ -438,21 +438,7 @@ textarea {
 .combo-field {
   position: relative;
   display: flex;
-  align-items: stretch;
-  gap: 6px;
-}
-
-.combo-toggle {
-  display: none;
   align-items: center;
-  justify-content: center;
-  border: 1px solid #d1d5db;
-  background: #f1f5f9;
-  border-radius: 6px;
-  padding: 0 10px;
-  font-size: 16px;
-  cursor: pointer;
-  min-width: 44px;
 }
 
 .combo-suggestions {
@@ -750,7 +736,7 @@ tbody tr:nth-child(even) {
 
 .directory-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 16px;
 }
 
@@ -1854,6 +1840,11 @@ footer {
     grid-template-columns: 1fr;
   }
 
+  .directory-modal-content {
+    width: 100%;
+    max-width: 100%;
+  }
+
   form .flex {
     flex-direction: column;
     align-items: stretch;
@@ -1881,10 +1872,6 @@ footer {
 
   .table-wrapper table {
     min-width: 520px;
-  }
-
-  .combo-toggle {
-    display: inline-flex;
   }
 
   .combo-field input {
@@ -1981,6 +1968,55 @@ footer {
     font-size: 11px;
     min-height: 28px;
   }
+}
+
+.password-field {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  flex: 1 1 auto;
+}
+
+.password-visibility {
+  min-width: 44px;
+  border: 1px solid #d1d5db;
+  background: #f1f5f9;
+  border-radius: 6px;
+  font-size: 16px;
+}
+
+.password-row {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.password-hint {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 4px;
+}
+
+.password-row .password-hint.inline-hint {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.directory-modal-content .modal-body {
+  overflow-x: hidden;
+}
+
+.directory-modal-content .table-wrapper {
+  overflow-x: hidden;
+}
+
+.directory-modal-content .table-wrapper table {
+  min-width: 0;
+  width: 100%;
+}
+
+.directory-modal-content .flex {
+  gap: 10px;
 }
 
 @media (max-width: 480px) {

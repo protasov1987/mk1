@@ -12,6 +12,7 @@
       <h2>Вход</h2>
       <form id="login-form">
         <input type="password" id="login-password" name="password" placeholder="Пароль" required />
+        <div class="password-hint">Тестовый пароль 123456a</div>
         <button type="submit" id="login-submit">Войти</button>
         <div id="login-error" style="display:none;"></div>
       </form>
@@ -48,6 +49,7 @@
       <form id="auth-form">
         <label for="auth-password">Пароль</label>
         <input type="password" id="auth-password" name="password" autocomplete="current-password" required />
+        <div class="password-hint">Тестовый пароль 123456a</div>
         <div id="auth-error" class="auth-error" aria-live="assertive"></div>
         <button type="submit">Войти</button>
       </form>
@@ -298,7 +300,6 @@
                     <label for="route-op">Операции</label>
                     <div class="combo-field">
                       <input id="route-op" list="route-op-options" placeholder="Начните вводить название или код" required />
-                      <button type="button" class="combo-toggle" data-combo-target="op" aria-label="Показать операции">▾</button>
                       <div class="combo-suggestions" id="route-op-suggestions" role="listbox"></div>
                     </div>
                     <datalist id="route-op-options"></datalist>
@@ -307,7 +308,6 @@
                     <label for="route-center">Участки</label>
                     <div class="combo-field">
                       <input id="route-center" list="route-center-options" placeholder="Начните вводить участок" required />
-                      <button type="button" class="combo-toggle" data-combo-target="center" aria-label="Показать участки">▾</button>
                       <div class="combo-suggestions" id="route-center-suggestions" role="listbox"></div>
                     </div>
                     <datalist id="route-center-options"></datalist>
@@ -591,17 +591,18 @@
           <input id="user-name" required />
           <label for="user-password">Пароль</label>
           <div class="password-row">
-            <input id="user-password" type="text" minlength="6" />
+            <div class="password-field">
+              <input id="user-password" type="password" minlength="6" />
+              <button type="button" class="icon-btn password-visibility" id="user-password-visibility" aria-label="Показать пароль">
+                👁
+              </button>
+            </div>
+            <div class="password-hint inline-hint">Тестовый пароль 123456a</div>
             <button type="button" class="btn-secondary" id="user-generate">Сгенерировать</button>
             <button type="button" class="btn-secondary" id="user-barcode">Печать штрихкода</button>
           </div>
           <label for="user-access-level">Уровень доступа</label>
           <select id="user-access-level"></select>
-          <label for="user-status">Статус</label>
-          <select id="user-status">
-            <option value="active">Активен</option>
-            <option value="inactive">Отключён</option>
-          </select>
           <div class="modal-actions">
             <button type="submit" class="btn-primary">Сохранить</button>
             <button type="button" class="btn-secondary" id="user-cancel">Отмена</button>
