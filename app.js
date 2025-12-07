@@ -6,6 +6,7 @@ let ops = [];
 let centers = [];
 let accessLevels = [];
 let users = [];
+let userPasswordCache = {};
 let workorderSearchTerm = '';
 let workorderStatusFilter = 'ALL';
 let workorderMissingExecutorFilter = 'ALL';
@@ -45,6 +46,7 @@ const ACCESS_TAB_CONFIG = [
 ];
 const USER_DATALIST_ID = 'user-combobox-options';
 const FORBIDDEN_EXECUTOR = 'abyss';
+const USER_PASSWORD_CACHE_KEY = 'userPasswordCache';
 let currentUser = null;
 let appBootstrapped = false;
 let timersStarted = false;
@@ -53,6 +55,49 @@ let inactivityTimer = null;
 function sanitizeExecutorName(name = '') {
   if ((name || '').toLowerCase() === FORBIDDEN_EXECUTOR) return '';
   return name;
+}
+
+function loadUserPasswordCache() {
+  try {
+    const stored = localStorage.getItem(USER_PASSWORD_CACHE_KEY);
+    userPasswordCache = stored ? JSON.parse(stored) || {} : {};
+  } catch (err) {
+    console.warn('Не удалось загрузить кэш паролей', err);
+    userPasswordCache = {};
+  }
+}
+
+function persistUserPasswordCache() {
+  try {
+    localStorage.setItem(USER_PASSWORD_CACHE_KEY, JSON.stringify(userPasswordCache));
+  } catch (err) {
+    console.warn('Не удалось сохранить кэш паролей', err);
+  }
+}
+
+function rememberUserPassword(userId, password) {
+  if (!userId || !password) return;
+  userPasswordCache[userId] = password;
+  persistUserPasswordCache();
+}
+
+function forgetMissingUserPasswords(activeUsers = []) {
+  const activeIds = new Set((activeUsers || []).map(u => u.id));
+  let changed = false;
+  Object.keys(userPasswordCache).forEach(id => {
+    if (!activeIds.has(id)) {
+      delete userPasswordCache[id];
+      changed = true;
+    }
+  });
+  if (changed) persistUserPasswordCache();
+}
+
+function resolveUserPassword(user) {
+  if (!user) return '';
+  if (user.password) return user.password;
+  const cached = userPasswordCache[user.id];
+  return cached || '';
 }
 
 function setConnectionStatus(message, variant = 'info') {
@@ -1316,6 +1361,11 @@ async function loadSecurityData() {
     if (usersRes.ok) {
       const payload = await usersRes.json();
       users = Array.isArray(payload.users) ? payload.users : [];
+      users.forEach(u => {
+        const cached = resolveUserPassword(u);
+        if (cached) u.password = cached;
+      });
+      forgetMissingUserPasswords(users);
       renderUserDatalist();
     }
     if (levelsRes.ok) {
@@ -2101,10 +2151,9 @@ function updateCardSectionsVisibility() {
 function updateCardSectionMenuItems() {
   const menu = document.getElementById('card-section-menu');
   if (!menu) return;
-  const isMobile = window.innerWidth <= 768;
   menu.querySelectorAll('.card-section-menu-item[data-section-target]').forEach(item => {
     const key = item.getAttribute('data-section-target');
-    const shouldHide = isMobile && key === cardActiveSectionKey;
+    const shouldHide = key === cardActiveSectionKey;
     item.classList.toggle('hidden', shouldHide);
     item.setAttribute('aria-hidden', shouldHide ? 'true' : 'false');
     item.tabIndex = shouldHide ? -1 : 0;
@@ -5443,7 +5492,9 @@ function openUserModal(user) {
   const pwdInput = document.getElementById('user-password');
   if (pwdInput) {
     pwdInput.setAttribute('type', 'password');
-    pwdInput.value = user && user.password ? user.password : '';
+    const resolvedPassword = resolveUserPassword(user);
+    pwdInput.value = resolvedPassword;
+    pwdInput.dataset.initialPassword = resolvedPassword || '';
   }
   const select = document.getElementById('user-access-level');
   if (select) {
@@ -5489,11 +5540,14 @@ function closeAccessLevelModal() {
 async function saveUserFromModal() {
   const id = document.getElementById('user-id').value;
   const name = document.getElementById('user-name').value;
-  const password = document.getElementById('user-password').value;
+  const passwordInput = document.getElementById('user-password');
+  const initialPassword = passwordInput ? (passwordInput.dataset.initialPassword || '') : '';
+  const password = passwordInput ? passwordInput.value.trim() : '';
   const accessLevelId = document.getElementById('user-access-level').value;
   const errorEl = document.getElementById('user-error');
   if (errorEl) { errorEl.textContent = ''; }
-  const payload = { name, password: password || undefined, accessLevelId, status: 'active' };
+  const passwordChanged = !!password && password !== initialPassword;
+  const payload = { name, password: passwordChanged ? password : undefined, accessLevelId, status: 'active' };
   const method = id ? 'PUT' : 'POST';
   const url = id ? '/api/security/users/' + id : '/api/security/users';
   const res = await fetch(url, { method, credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -5503,6 +5557,11 @@ async function saveUserFromModal() {
     return;
   }
   await loadSecurityData();
+  const updatedUser = id ? users.find(u => u.id === id) : users.find(u => (u.name || '') === name);
+  const effectivePassword = passwordChanged ? password : (initialPassword || resolveUserPassword(updatedUser));
+  if (updatedUser && effectivePassword) {
+    rememberUserPassword(updatedUser.id, effectivePassword);
+  }
   renderUsersTable();
   closeUserModal();
 }
@@ -5595,6 +5654,7 @@ function setupSecurityControls() {
 
 // === ИНИЦИАЛИЗАЦИЯ ===
 document.addEventListener('DOMContentLoaded', async () => {
+  loadUserPasswordCache();
   setupResponsiveNav();
   startRealtimeClock();
   setupAuthControls();
