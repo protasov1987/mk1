@@ -221,84 +221,110 @@
           <h2 id="card-modal-title">Карта</h2>
         </div>
         <div class="modal-body">
-          <form id="card-form" class="flex-col">
-            <input type="hidden" id="card-id" />
-            <div class="card-meta-grid">
-              <div class="flex-col">
-                <label for="card-name">Наименование карты / изделия</label>
-                <input id="card-name" required />
-              </div>
-              <div class="flex-col">
-                <label for="card-qty">Количество изделий, шт</label>
-                <input id="card-qty" type="number" min="0" step="1" />
-              </div>
-              <div class="flex-col">
-                <label for="card-order">Номер / код заказа</label>
-                <input id="card-order" />
-              </div>
-              <div class="flex-col">
-                <label for="card-drawing">Чертёж / обозначение детали</label>
-                <input id="card-drawing" />
-              </div>
-              <div class="flex-col" style="flex:3 1 360px;">
-                <label for="card-material">Материал</label>
-                <input id="card-material" />
-              </div>
-              <div class="flex-col">
-                <label for="card-contract">Номер договора</label>
-                <input id="card-contract" />
-              </div>
+          <div class="card-mobile-menu" aria-label="Разделы создания карты">
+            <button type="button" id="card-section-menu-toggle" class="btn-secondary card-menu-toggle" aria-expanded="false">☰ Разделы</button>
+            <span class="card-menu-active" id="card-mobile-active-label">Основная информация</span>
+            <div class="card-section-menu" id="card-section-menu">
+              <div class="card-section-menu-title">Навигация</div>
+              <button type="button" class="card-section-menu-item" data-section-target="main">Основная информация</button>
+              <button type="button" class="card-section-menu-item" data-section-target="operations">Операции</button>
+              <button type="button" class="card-section-menu-item" data-section-target="add">Добавление операций</button>
             </div>
-            <div class="flex-col">
-              <label for="card-desc">Описание</label>
-              <textarea id="card-desc"></textarea>
-            </div>
-            <div class="flex" style="align-items:center; justify-content:space-between;">
-              <div>
-                <strong>Статус:</strong> <span id="card-status-text"></span>
-              </div>
-              <div class="flex" style="gap:8px; align-items:center;">
-                <label class="toggle-row" title="Добавить в маршрут список изделий">
-                  <input type="checkbox" id="card-use-items" />
-                  <span>Список изделий</span>
-                </label>
-                <button type="button" id="card-attachments-btn" class="btn-secondary">📎 Файлы (0)</button>
-              </div>
-            </div>
-          </form>
+          </div>
 
-          <div class="card inset-card" id="route-editor">
-            <h3>Маршрут выполнения операций</h3>
-            <div id="route-table-wrapper" class="table-wrapper"></div>
-            <div class="route-add-panel">
-              <h3>Добавить операцию в маршрут</h3>
-              <form id="route-form" class="flex route-form-grid" style="flex-wrap:wrap;">
-                <div class="flex-col" style="flex:1 1 140px;">
-                  <label for="route-op-code">Код операции</label>
-                  <input id="route-op-code" placeholder="Напишите код" />
+          <div class="card-section card-section-main active" data-section="main">
+            <form id="card-form" class="flex-col">
+              <input type="hidden" id="card-id" />
+              <div class="card-meta-grid">
+                <div class="flex-col">
+                  <label for="card-name">Наименование карты / изделия</label>
+                  <input id="card-name" required />
                 </div>
-                <div class="flex-col" style="flex:2 1 200px;">
-                  <label for="route-op">Операции</label>
-                  <input id="route-op" list="route-op-options" placeholder="Начните вводить название или код" required />
-                  <datalist id="route-op-options"></datalist>
+                <div class="flex-col">
+                  <label for="card-qty">Количество изделий, шт</label>
+                  <input id="card-qty" type="number" min="0" step="1" />
                 </div>
-                <div class="flex-col" style="flex:2 1 200px;">
-                  <label for="route-center">Участки</label>
-                  <input id="route-center" list="route-center-options" placeholder="Начните вводить участок" required />
-                  <datalist id="route-center-options"></datalist>
+                <div class="flex-col">
+                  <label for="card-order">Номер / код заказа</label>
+                  <input id="card-order" />
                 </div>
-                <div class="flex-col" style="flex:1 1 140px;">
-                  <label for="route-qty">Количество изделий</label>
-                  <input id="route-qty" type="number" min="0" />
+                <div class="flex-col">
+                  <label for="card-drawing">Чертёж / обозначение детали</label>
+                  <input id="card-drawing" />
                 </div>
-                <div class="flex-col" style="flex:1 1 120px;">
-                  <label for="route-planned">Плановое время (мин)</label>
-                  <input id="route-planned" type="number" min="1" value="30" required />
+                <div class="flex-col" style="flex:3 1 360px;">
+                  <label for="card-material">Материал</label>
+                  <input id="card-material" />
                 </div>
-                <div class="flex-col" style="flex:0 0 auto; align-self:flex-end;">
-                  <button type="submit" class="btn-primary">Добавить</button>
+                <div class="flex-col">
+                  <label for="card-contract">Номер договора</label>
+                  <input id="card-contract" />
                 </div>
-              </form>
+              </div>
+              <div class="flex-col">
+                <label for="card-desc">Описание</label>
+                <textarea id="card-desc"></textarea>
+              </div>
+              <div class="flex" style="align-items:center; justify-content:space-between;">
+                <div>
+                  <strong>Статус:</strong> <span id="card-status-text"></span>
+                </div>
+                <div class="flex" style="gap:8px; align-items:center;">
+                  <label class="toggle-row" title="Добавить в маршрут список изделий">
+                    <input type="checkbox" id="card-use-items" />
+                    <span>Список изделий</span>
+                  </label>
+                  <button type="button" id="card-attachments-btn" class="btn-secondary">📎 Файлы (0)</button>
+                </div>
+              </div>
+            </form>
+          </div>
+
+          <div id="route-editor">
+            <div class="card inset-card card-section card-section-operations" data-section="operations">
+              <h3>Маршрут выполнения операций</h3>
+              <div id="route-table-wrapper" class="table-wrapper"></div>
+            </div>
+            <div class="card inset-card card-section card-section-add" data-section="add">
+              <h3>Добавление операций</h3>
+              <div class="route-add-panel">
+                <h3>Добавить операцию в маршрут</h3>
+                <form id="route-form" class="flex route-form-grid" style="flex-wrap:wrap;">
+                  <div class="flex-col" style="flex:1 1 140px;">
+                    <label for="route-op-code">Код операции</label>
+                    <input id="route-op-code" placeholder="Напишите код" />
+                  </div>
+                  <div class="flex-col" style="flex:2 1 200px;">
+                    <label for="route-op">Операции</label>
+                    <div class="combo-field">
+                      <input id="route-op" list="route-op-options" placeholder="Начните вводить название или код" required />
+                      <button type="button" class="combo-toggle" data-combo-target="op" aria-label="Показать операции">▾</button>
+                      <div class="combo-suggestions" id="route-op-suggestions" role="listbox"></div>
+                    </div>
+                    <datalist id="route-op-options"></datalist>
+                  </div>
+                  <div class="flex-col" style="flex:2 1 200px;">
+                    <label for="route-center">Участки</label>
+                    <div class="combo-field">
+                      <input id="route-center" list="route-center-options" placeholder="Начните вводить участок" required />
+                      <button type="button" class="combo-toggle" data-combo-target="center" aria-label="Показать участки">▾</button>
+                      <div class="combo-suggestions" id="route-center-suggestions" role="listbox"></div>
+                    </div>
+                    <datalist id="route-center-options"></datalist>
+                  </div>
+                  <div class="flex-col" style="flex:1 1 140px;">
+                    <label for="route-qty">Количество изделий</label>
+                    <input id="route-qty" type="number" min="0" />
+                  </div>
+                  <div class="flex-col" style="flex:1 1 120px;">
+                    <label for="route-planned">Плановое время (мин)</label>
+                    <input id="route-planned" type="number" min="1" value="30" required />
+                  </div>
+                  <div class="flex-col" style="flex:0 0 auto; align-self:flex-end;">
+                    <button type="submit" class="btn-primary">Добавить</button>
+                  </div>
+                </form>
+              </div>
             </div>
           </div>
         </div>
