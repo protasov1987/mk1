@@ -2095,6 +2095,20 @@ function updateCardSectionsVisibility() {
       section.hidden = false;
     }
   });
+  updateCardSectionMenuItems();
+}
+
+function updateCardSectionMenuItems() {
+  const menu = document.getElementById('card-section-menu');
+  if (!menu) return;
+  const isMobile = window.innerWidth <= 768;
+  menu.querySelectorAll('.card-section-menu-item[data-section-target]').forEach(item => {
+    const key = item.getAttribute('data-section-target');
+    const shouldHide = isMobile && key === cardActiveSectionKey;
+    item.classList.toggle('hidden', shouldHide);
+    item.setAttribute('aria-hidden', shouldHide ? 'true' : 'false');
+    item.tabIndex = shouldHide ? -1 : 0;
+  });
 }
 
 function setActiveCardSection(sectionKey = 'main') {
@@ -2103,6 +2117,7 @@ function setActiveCardSection(sectionKey = 'main') {
   if (labelEl) {
     labelEl.textContent = cardSectionLabel(cardActiveSectionKey);
   }
+  updateCardSectionMenuItems();
   updateCardSectionsVisibility();
 }
 
@@ -3955,6 +3970,11 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-card-id="' + card.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
       const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-card-id="' + card.id + '" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
       const inlineActions = '<span class="summary-inline-actions workorder-inline-actions">' + barcodeButton + filesButton + '</span>';
+      const statusRow = '<div class="group-status-row">' +
+        (missingBadge ? missingBadge + ' ' : '') +
+        stateBadge +
+        (groupExecutorBtn ? ' ' + groupExecutorBtn : '') +
+        '</div>';
       const childrenHtml = children.length
         ? children.map(child => buildWorkorderCardDetails(child, { opened: !collapseAll && workorderOpenCards.has(child.id), allowArchive: false, readonly })).join('')
         : '<p class="group-empty">В группе нет карт для отображения.</p>';
@@ -3969,8 +3989,8 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
         inlineActions +
         '</span>' +
         '</div>' +
-        '<div class="summary-actions">' +
-        groupExecutorBtn + ' ' + (missingBadge ? missingBadge + ' ' : '') + stateBadge +
+        '<div class="summary-actions group-summary-actions">' +
+        statusRow +
         (!readonly && card.status === 'DONE' ? ' <button type="button" class="btn-small btn-secondary archive-group-btn" data-group-id="' + card.id + '">Перенести в архив</button>' : '') +
         '</div>' +
         '</div>' +
@@ -5420,7 +5440,11 @@ function openUserModal(user) {
   modal.classList.remove('hidden');
   document.getElementById('user-id').value = user ? user.id : '';
   document.getElementById('user-name').value = user ? user.name || '' : '';
-  document.getElementById('user-password').value = '';
+  const pwdInput = document.getElementById('user-password');
+  if (pwdInput) {
+    pwdInput.setAttribute('type', 'password');
+    pwdInput.value = user && user.password ? user.password : '';
+  }
   const select = document.getElementById('user-access-level');
   if (select) {
     select.innerHTML = accessLevels.map(l => '<option value="' + l.id + '">' + escapeHtml(l.name || '') + '</option>').join('');

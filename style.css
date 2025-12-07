@@ -556,6 +556,17 @@ textarea {
   display: block;
 }
 
+.group-summary-actions {
+  align-items: center;
+}
+
+.group-status-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
 .barcode-view-btn {
   display: inline-flex;
   align-items: center;
@@ -1894,11 +1905,11 @@ footer {
 @media (max-width: 600px) {
   header {
     display: grid;
-    grid-template-columns: 1fr auto auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     grid-template-areas:
       'brand user toggle'
       'nav nav nav';
-    column-gap: 8px;
+    column-gap: 6px;
     row-gap: 6px;
     align-items: center;
   }
@@ -1908,19 +1919,23 @@ footer {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
+    min-width: 0;
   }
 
   .header-left h1 {
-    font-size: 15px;
+    font-size: 14px;
     line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .user-panel {
     grid-area: user;
     display: inline-flex;
     flex-wrap: nowrap;
-    gap: 6px;
+    gap: 4px;
     justify-content: flex-end;
     align-items: center;
     margin-left: 0;
@@ -1929,13 +1944,14 @@ footer {
 
   .user-badge {
     width: auto;
-    font-size: 13px;
+    font-size: 12px;
     text-align: right;
+    white-space: nowrap;
   }
 
   .btn-logout {
-    padding: 6px 10px;
-    font-size: 13px;
+    padding: 6px 8px;
+    font-size: 12px;
     width: auto;
   }
 
@@ -1967,6 +1983,42 @@ footer {
     padding: 3px 6px;
     font-size: 11px;
     min-height: 28px;
+  }
+
+  .group-summary-actions {
+    justify-content: flex-end;
+    gap: 4px;
+  }
+
+  .group-status-row {
+    gap: 4px;
+  }
+
+  .group-executor-btn {
+    padding: 5px 7px;
+    font-size: 11px;
+    min-width: 0;
+    white-space: nowrap;
+  }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .stat-block {
+    min-width: 0;
+    padding: 6px 4px;
+    text-align: center;
+  }
+
+  .stat-block span {
+    font-size: 10px;
+  }
+
+  .stat-block strong {
+    font-size: 16px;
   }
 }
 
