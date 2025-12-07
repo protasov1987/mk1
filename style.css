@@ -1254,6 +1254,18 @@ footer {
   font-size: 12px;
 }
 
+.summary-inline-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.summary-inline-actions .btn-small,
+.summary-inline-actions .clip-btn {
+  min-width: auto;
+}
+
 .summary-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1817,7 +1829,7 @@ footer {
     grid-template-columns: 1fr auto;
     grid-template-areas:
       'brand user'
-      'clock user'
+      'clock clock'
       'toggle toggle'
       'nav nav';
     row-gap: 8px;
@@ -1832,12 +1844,12 @@ footer {
   }
 
   .header-left h1 {
-    font-size: 16px;
+    font-size: 15px;
     line-height: 1.2;
   }
 
   .clock-display {
-    grid-row: 2;
+    grid-area: clock;
     font-size: 12px;
     padding: 2px 6px;
     margin: 0;
@@ -1846,10 +1858,10 @@ footer {
 
   .user-panel {
     grid-area: user;
-    display: grid;
-    grid-template-rows: auto auto;
-    row-gap: 6px;
-    justify-items: end;
+    display: inline-flex;
+    flex-wrap: nowrap;
+    gap: 8px;
+    justify-content: flex-end;
     align-items: center;
     margin-left: 0;
     width: auto;
@@ -1862,8 +1874,6 @@ footer {
   }
 
   .btn-logout {
-    grid-row: 2;
-    justify-self: end;
     padding: 6px 10px;
     font-size: 13px;
     width: auto;
@@ -1876,6 +1886,27 @@ footer {
 
   .nav-menu {
     grid-area: nav;
+  }
+
+  .summary-sub {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .summary-inline-actions {
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+
+  .summary-inline-actions .btn-small,
+  .summary-inline-actions .clip-btn {
+    width: auto;
+    min-width: 0;
+    padding: 3px 6px;
+    font-size: 11px;
+    min-height: 28px;
   }
 }
 
@@ -1911,6 +1942,11 @@ footer {
   .btn-danger,
   .btn-small {
     width: 100%;
+  }
+
+  .summary-inline-actions .btn-small,
+  .summary-inline-actions .clip-btn {
+    width: auto;
   }
 
   .user-panel .btn-logout {

@@ -3354,6 +3354,7 @@ function buildWorkorderCardDetails(card, { opened = false, allowArchive = true, 
   const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-allow-view="true" data-card-id="' + card.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
   const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-card-id="' + card.id + '" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
   const logButton = showLog ? ' <button type="button" class="btn-small btn-secondary log-btn" data-allow-view="true" data-log-card="' + card.id + '">Log</button>' : '';
+  const inlineActions = '<span class="summary-inline-actions">' + barcodeButton + filesButton + logButton + '</span>';
   const nameLabel = formatCardNameWithGroupPosition(card);
 
   let html = '<details class="wo-card" data-card-id="' + card.id + '"' + (opened ? ' open' : '') + '>' +
@@ -3363,7 +3364,7 @@ function buildWorkorderCardDetails(card, { opened = false, allowArchive = true, 
     '<strong>' + nameLabel + '</strong>' +
     ' <span class="summary-sub">' +
     (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') + contractText +
-    barcodeButton + filesButton + logButton +
+    inlineActions +
     '</span>' +
     '</div>' +
     '<div class="summary-actions">' +
