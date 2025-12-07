@@ -33,6 +33,7 @@ let dashboardEligibleCache = [];
 let workspaceSearchTerm = '';
 let workspaceStopContext = null;
 let workspaceActiveModalInput = null;
+let cardActiveSectionKey = 'main';
 const ACCESS_TAB_CONFIG = [
   { key: 'dashboard', label: 'Дашборд' },
   { key: 'cards', label: 'Тех. карты' },
@@ -201,6 +202,10 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function wrapTable(tableHtml) {
+  return '<div class="table-wrapper">' + tableHtml + '</div>';
 }
 
 function formatSecondsToHMS(sec) {
@@ -1633,7 +1638,7 @@ function renderDashboard() {
       emptyMessage
     });
   } else if (dashTableWrapper) {
-    dashTableWrapper.innerHTML = '<table>' + tableHeader + '<tbody>' + rowsHtml.join('') + '</tbody></table>';
+    dashTableWrapper.innerHTML = wrapTable('<table>' + tableHeader + '<tbody>' + rowsHtml.join('') + '</tbody></table>');
   }
 }
 
@@ -2060,6 +2065,78 @@ function createEmptyCardDraft() {
   };
 }
 
+function cardSectionLabel(sectionKey) {
+  const labels = {
+    main: 'Основная информация',
+    operations: 'Операции',
+    add: 'Добавление операций'
+  };
+  return labels[sectionKey] || labels.main;
+}
+
+function updateCardSectionsVisibility() {
+  const sections = document.querySelectorAll('#card-modal .card-section');
+  const isMobile = window.innerWidth <= 768;
+  sections.forEach(section => {
+    const key = section.dataset.section;
+    if (!key) return;
+    if (isMobile) {
+      const isActive = key === cardActiveSectionKey;
+      section.classList.toggle('active', isActive);
+      section.hidden = !isActive;
+    } else {
+      section.classList.add('active');
+      section.hidden = false;
+    }
+  });
+}
+
+function setActiveCardSection(sectionKey = 'main') {
+  cardActiveSectionKey = sectionKey;
+  const labelEl = document.getElementById('card-mobile-active-label');
+  if (labelEl) {
+    labelEl.textContent = cardSectionLabel(cardActiveSectionKey);
+  }
+  updateCardSectionsVisibility();
+}
+
+function closeCardSectionMenu() {
+  const toggle = document.getElementById('card-section-menu-toggle');
+  const menu = document.getElementById('card-section-menu');
+  if (menu) menu.classList.remove('open');
+  if (toggle) toggle.setAttribute('aria-expanded', 'false');
+}
+
+function setupCardSectionMenu() {
+  const toggle = document.getElementById('card-section-menu-toggle');
+  const menu = document.getElementById('card-section-menu');
+  if (!toggle || !menu) return;
+
+  toggle.addEventListener('click', () => {
+    const isOpen = menu.classList.toggle('open');
+    toggle.setAttribute('aria-expanded', String(isOpen));
+  });
+
+  menu.addEventListener('click', e => {
+    const target = e.target.closest('button');
+    if (!target) return;
+    const sectionKey = target.getAttribute('data-section-target');
+    const actionTarget = target.getAttribute('data-action-target');
+    if (sectionKey) {
+      setActiveCardSection(sectionKey);
+      closeCardSectionMenu();
+      return;
+    }
+    if (actionTarget) {
+      const btn = document.getElementById(actionTarget);
+      if (btn) btn.click();
+      closeCardSectionMenu();
+    }
+  });
+
+  window.addEventListener('resize', () => updateCardSectionsVisibility());
+}
+
 function openCardModal(cardId) {
   const modal = document.getElementById('card-modal');
   if (!modal) return;
@@ -2104,6 +2181,8 @@ function openCardModal(cardId) {
   if (routeQtyInput) routeQtyInput.value = activeCardDraft.quantity !== '' ? activeCardDraft.quantity : '';
   renderRouteTableDraft();
   fillRouteSelectors();
+  setActiveCardSection('main');
+  closeCardSectionMenu();
   modal.classList.remove('hidden');
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -2292,7 +2371,7 @@ function renderAttachmentsModal() {
         '</tr>';
     });
     html += '</tbody></table>';
-    list.innerHTML = html;
+    list.innerHTML = wrapTable(html);
   }
   uploadHint.textContent = 'Допустимые форматы: pdf, doc, jpg, архив. Максимум ' + formatBytes(ATTACH_MAX_SIZE) + '.';
 
@@ -2708,7 +2787,8 @@ function buildInitialSnapshotHtml(card) {
     '<div><strong>Описание:</strong> ' + escapeHtml(snapshot.desc || '') + '</div>' +
     '</div>';
   const opsHtml = buildInitialSummaryTable(snapshot);
-  return metaHtml + opsHtml;
+  const wrappedOps = opsHtml.trim().startsWith('<table') ? wrapTable(opsHtml) : opsHtml;
+  return metaHtml + wrappedOps;
 }
 
 function renderInitialSnapshot(card) {
@@ -3532,7 +3612,7 @@ function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = fa
   });
 
   html += '</tbody></table>';
-  return html;
+  return '<div class="table-wrapper operations-table-wrapper">' + html + '</div>';
 }
 
 function formatQuantityValue(val) {
@@ -4553,11 +4633,11 @@ function tickTimers() {
     const card = row.card;
     const op = row.op;
     const rowId = card.id + '::' + op.id;
-    const span = document.querySelector('.wo-timer[data-row-id="' + rowId + '"]');
-    if (span) {
-      const elapsedSec = getOperationElapsedSeconds(op);
+    const spans = document.querySelectorAll('.wo-timer[data-row-id="' + rowId + '"]');
+    const elapsedSec = getOperationElapsedSeconds(op);
+    spans.forEach(span => {
       span.textContent = formatSecondsToHMS(elapsedSec);
-    }
+    });
   });
 
   refreshCardStatuses();
@@ -4683,6 +4763,8 @@ function setupForms() {
   document.getElementById('btn-new-card').addEventListener('click', () => {
     openCardModal();
   });
+
+  setupCardSectionMenu();
 
   const cardForm = document.getElementById('card-form');
   if (cardForm) {
