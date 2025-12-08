@@ -1341,6 +1341,7 @@ async function loadData() {
 
   ensureDefaults();
   ensureOperationCodes();
+  renderUserDatalist();
 
   cards.forEach(c => {
     if (!c.barcode || !/^\d{13}$/.test(c.barcode)) {
@@ -3402,13 +3403,6 @@ function updateExecutorCombo(input, { forceOpen = false } = {}) {
   const combo = input.closest('.executor-combo');
   const container = combo ? combo.querySelector('.executor-suggestions') : null;
   if (!container) return;
-
-  if (window.innerWidth > 768) {
-    container.classList.remove('open');
-    container.innerHTML = '';
-    resetExecutorSuggestionPosition(container);
-    return;
-  }
 
   const options = filterExecutorChoices(input.value);
   container.innerHTML = '';
