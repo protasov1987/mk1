@@ -1341,6 +1341,7 @@ async function loadData() {
 
   ensureDefaults();
   ensureOperationCodes();
+  renderUserDatalist();
 
   cards.forEach(c => {
     if (!c.barcode || !/^\d{13}$/.test(c.barcode)) {
