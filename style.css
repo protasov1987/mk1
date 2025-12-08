@@ -468,6 +468,12 @@ textarea {
   display: block;
 }
 
+@media (min-width: 769px) {
+  .executor-suggestions {
+    display: none !important;
+  }
+}
+
 .combo-option {
   padding: 10px 12px;
   cursor: pointer;

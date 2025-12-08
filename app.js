@@ -1341,6 +1341,7 @@ async function loadData() {
 
   ensureDefaults();
   ensureOperationCodes();
+  renderUserDatalist();
 
   cards.forEach(c => {
     if (!c.barcode || !/^\d{13}$/.test(c.barcode)) {
@@ -3397,13 +3398,19 @@ function filterExecutorChoices(filter) {
     .slice(0, 30);
 }
 
+function shouldUseCustomExecutorCombo() {
+  const pointerCoarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  const touchCapable = typeof navigator !== 'undefined' && Number(navigator.maxTouchPoints || 0) > 0;
+  return (pointerCoarse || touchCapable) && window.innerWidth <= 1024;
+}
+
 function updateExecutorCombo(input, { forceOpen = false } = {}) {
   if (!input) return;
   const combo = input.closest('.executor-combo');
   const container = combo ? combo.querySelector('.executor-suggestions') : null;
   if (!container) return;
 
-  if (window.innerWidth > 768) {
+  if (!shouldUseCustomExecutorCombo()) {
     container.classList.remove('open');
     container.innerHTML = '';
     resetExecutorSuggestionPosition(container);
@@ -3424,6 +3431,7 @@ function updateExecutorCombo(input, { forceOpen = false } = {}) {
     btn.className = 'combo-option';
     btn.textContent = name;
     btn.addEventListener('mousedown', e => e.preventDefault());
+    btn.addEventListener('pointerdown', e => e.preventDefault());
     btn.addEventListener('click', () => {
       input.value = name;
       input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -3443,7 +3451,7 @@ function updateExecutorCombo(input, { forceOpen = false } = {}) {
 }
 
 function repositionOpenExecutorSuggestions() {
-  if (window.innerWidth > 768) return;
+  if (!shouldUseCustomExecutorCombo()) return;
   const openContainers = document.querySelectorAll('.executor-suggestions.open');
   openContainers.forEach(container => {
     const combo = container.closest('.executor-combo');
@@ -3454,7 +3462,35 @@ function repositionOpenExecutorSuggestions() {
   });
 }
 
-window.addEventListener('resize', repositionOpenExecutorSuggestions);
+function syncExecutorComboboxMode() {
+  const useCustom = shouldUseCustomExecutorCombo();
+  const inputs = document.querySelectorAll('.executor-main-input, .additional-executor-input');
+  inputs.forEach(input => {
+    if (useCustom) {
+      if (input.hasAttribute('list')) {
+        input.removeAttribute('list');
+      }
+    } else {
+      if (input.getAttribute('list') !== USER_DATALIST_ID) {
+        input.setAttribute('list', USER_DATALIST_ID);
+      }
+    }
+  });
+
+  document.querySelectorAll('.executor-suggestions').forEach(container => {
+    if (!useCustom) {
+      container.classList.remove('open');
+      resetExecutorSuggestionPosition(container);
+    }
+  });
+}
+
+function handleExecutorViewportChange() {
+  syncExecutorComboboxMode();
+  repositionOpenExecutorSuggestions();
+}
+
+window.addEventListener('resize', handleExecutorViewportChange);
 window.addEventListener('scroll', repositionOpenExecutorSuggestions, true);
 
 function fillRouteSelectors() {
@@ -3495,7 +3531,7 @@ function resetExecutorSuggestionPosition(container) {
 }
 
 function positionExecutorSuggestions(container, input) {
-  if (!container || !input || window.innerWidth > 768) {
+  if (!container || !input || !shouldUseCustomExecutorCombo()) {
     resetExecutorSuggestionPosition(container);
     return;
   }
@@ -4349,6 +4385,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       openSuggestions();
     });
     input.addEventListener('click', openSuggestions);
+    input.addEventListener('touchstart', openSuggestions);
     input.addEventListener('input', e => {
       const cardId = input.getAttribute('data-card-id');
       const opId = input.getAttribute('data-op-id');
@@ -4448,6 +4485,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       openSuggestions();
     });
     input.addEventListener('click', openSuggestions);
+    input.addEventListener('touchstart', openSuggestions);
     input.addEventListener('blur', e => {
       const cardId = input.getAttribute('data-card-id');
       const opId = input.getAttribute('data-op-id');
@@ -4553,10 +4591,10 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
     });
   });
 
-  wrapper.querySelectorAll('button[data-action]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      if (readonly) return;
-      const action = btn.getAttribute('data-action');
+    wrapper.querySelectorAll('button[data-action]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (readonly) return;
+        const action = btn.getAttribute('data-action');
       const cardId = btn.getAttribute('data-card-id');
       const opId = btn.getAttribute('data-op-id');
       const card = cards.find(c => c.id === cardId);
@@ -4568,15 +4606,16 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
         workorderOpenCards.add(cardId);
       }
 
-      const anchorGroupId = detail ? detail.getAttribute('data-group-id') : null;
-      applyOperationAction(action, card, op, { anchorGroupId });
+        const anchorGroupId = detail ? detail.getAttribute('data-group-id') : null;
+        applyOperationAction(action, card, op, { anchorGroupId });
+      });
     });
-  });
 
-  applyReadonlyState('workorders', 'workorders');
-}
+    syncExecutorComboboxMode();
+    applyReadonlyState('workorders', 'workorders');
+  }
 
-function renderWorkspaceView() {
+  function renderWorkspaceView() {
   const wrapper = document.getElementById('workspace-results');
   if (!wrapper) return;
   const readonly = isTabReadonly('workspace');
