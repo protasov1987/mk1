@@ -1145,6 +1145,10 @@ tbody tr:nth-child(even) {
   gap: 6px;
 }
 
+.executor-row .combo-field {
+  flex: 1 1 auto;
+}
+
 .executor-main-input {
   flex: 1;
   padding: 6px 8px;

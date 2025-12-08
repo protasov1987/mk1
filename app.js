@@ -3353,6 +3353,55 @@ function hideRouteCombos() {
   containers.forEach(el => el.classList.remove('open'));
 }
 
+function filterExecutorChoices(filter) {
+  const term = (filter || '').toLowerCase();
+  const source = Array.isArray(users) ? users : [];
+  return source
+    .map(u => (u && u.name ? u.name : ''))
+    .filter(Boolean)
+    .filter(name => name.toLowerCase() !== 'abyss')
+    .filter(name => !term || name.toLowerCase().includes(term))
+    .slice(0, 30);
+}
+
+function updateExecutorCombo(input, { forceOpen = false } = {}) {
+  if (!input) return;
+  const combo = input.closest('.executor-combo');
+  const container = combo ? combo.querySelector('.executor-suggestions') : null;
+  if (!container) return;
+
+  if (window.innerWidth > 768) {
+    container.classList.remove('open');
+    container.innerHTML = '';
+    return;
+  }
+
+  const options = filterExecutorChoices(input.value);
+  container.innerHTML = '';
+  if (!options.length) {
+    container.classList.remove('open');
+    return;
+  }
+
+  options.forEach(name => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'combo-option';
+    btn.textContent = name;
+    btn.addEventListener('mousedown', e => e.preventDefault());
+    btn.addEventListener('click', () => {
+      input.value = name;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      container.classList.remove('open');
+      input.focus();
+    });
+    container.appendChild(btn);
+  });
+
+  const shouldOpen = forceOpen || container.classList.contains('open');
+  container.classList.toggle('open', shouldOpen);
+}
+
 function fillRouteSelectors() {
   const opList = document.getElementById('route-op-options');
   const centerList = document.getElementById('route-center-options');
@@ -3518,6 +3567,7 @@ function buildWorkspaceCardDetails(card, { opened = true, readonly = false } = {
   const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
   const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-allow-view="true" data-card-id="' + card.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
   const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
+  const inlineActions = '<span class="summary-inline-actions workorder-inline-actions">' + barcodeButton + filesButton + '</span>';
   const nameLabel = formatCardNameWithGroupPosition(card);
 
   let html = '<details class="wo-card workspace-card" data-card-id="' + card.id + '"' + (opened ? ' open' : '') + '>' +
@@ -3527,7 +3577,7 @@ function buildWorkspaceCardDetails(card, { opened = true, readonly = false } = {
     '<strong>' + nameLabel + '</strong>' +
     ' <span class="summary-sub">' +
     (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') + contractText +
-    barcodeButton + filesButton +
+    inlineActions +
     '</span>' +
     '</div>' +
     '<div class="summary-actions">' + stateBadge + '</div>' +
@@ -3652,14 +3702,20 @@ function renderExecutorCell(op, card, { readonly = false } = {}) {
   const cardId = card ? card.id : '';
   let html = '<div class="executor-cell" data-card-id="' + cardId + '" data-op-id="' + op.id + '">';
   html += '<div class="executor-row primary">' +
-    '<input type="text" list="' + USER_DATALIST_ID + '" class="executor-main-input" data-card-id="' + cardId + '" data-op-id="' + op.id + '" value="' + escapeHtml(op.executor || '') + '" placeholder="Исполнитель" />' +
+    '<div class="combo-field executor-combo">' +
+      '<input type="text" list="' + USER_DATALIST_ID + '" class="executor-main-input" data-card-id="' + cardId + '" data-op-id="' + op.id + '" value="' + escapeHtml(op.executor || '') + '" placeholder="Исполнитель" />' +
+      '<div class="combo-suggestions executor-suggestions" role="listbox"></div>' +
+    '</div>' +
     (extras.length < 2 ? '<button type="button" class="icon-btn add-executor-btn" data-card-id="' + cardId + '" data-op-id="' + op.id + '">+</button>' : '') +
     '</div>';
 
   extras.forEach((name, idx) => {
     const canAddMore = extras.length < 2 && idx === extras.length - 1;
     html += '<div class="executor-row extra" data-extra-index="' + idx + '">' +
-      '<input type="text" list="' + USER_DATALIST_ID + '" class="additional-executor-input" data-card-id="' + cardId + '" data-op-id="' + op.id + '" data-extra-index="' + idx + '" value="' + escapeHtml(name || '') + '" placeholder="Доп. исполнитель" />' +
+      '<div class="combo-field executor-combo">' +
+        '<input type="text" list="' + USER_DATALIST_ID + '" class="additional-executor-input" data-card-id="' + cardId + '" data-op-id="' + op.id + '" data-extra-index="' + idx + '" value="' + escapeHtml(name || '') + '" placeholder="Доп. исполнитель" />' +
+        '<div class="combo-suggestions executor-suggestions" role="listbox"></div>' +
+      '</div>' +
       (canAddMore ? '<button type="button" class="icon-btn add-executor-btn" data-card-id="' + cardId + '" data-op-id="' + op.id + '">+</button>' : '') +
       '<button type="button" class="icon-btn remove-executor-btn" data-card-id="' + cardId + '" data-op-id="' + op.id + '" data-extra-index="' + idx + '">-</button>' +
       '</div>';
@@ -4198,9 +4254,12 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
   });
 
   wrapper.querySelectorAll('.executor-main-input').forEach(input => {
+    const openSuggestions = () => updateExecutorCombo(input, { forceOpen: true });
     input.addEventListener('focus', () => {
       input.dataset.prevVal = input.value || '';
+      openSuggestions();
     });
+    input.addEventListener('click', openSuggestions);
     input.addEventListener('input', e => {
       const cardId = input.getAttribute('data-card-id');
       const opId = input.getAttribute('data-op-id');
@@ -4211,6 +4270,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       if (!op.executor && (e.target.value || '').trim()) {
         e.target.value = '';
       }
+      updateExecutorCombo(input, { forceOpen: true });
     });
     input.addEventListener('blur', e => {
       const cardId = input.getAttribute('data-card-id');
@@ -4231,6 +4291,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
         saveData();
         renderDashboard();
       }
+      updateExecutorCombo(input);
     });
   });
 
@@ -4285,9 +4346,12 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
   });
 
   wrapper.querySelectorAll('.additional-executor-input').forEach(input => {
+    const openSuggestions = () => updateExecutorCombo(input, { forceOpen: true });
     input.addEventListener('focus', () => {
       input.dataset.prevVal = input.value || '';
+      openSuggestions();
     });
+    input.addEventListener('click', openSuggestions);
     input.addEventListener('blur', e => {
       const cardId = input.getAttribute('data-card-id');
       const opId = input.getAttribute('data-op-id');
@@ -4309,6 +4373,20 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
         saveData();
         renderDashboard();
       }
+      updateExecutorCombo(input);
+    });
+    input.addEventListener('input', e => {
+      const cardId = input.getAttribute('data-card-id');
+      const opId = input.getAttribute('data-op-id');
+      const idx = parseInt(input.getAttribute('data-extra-index'), 10);
+      const card = cards.find(c => c.id === cardId);
+      const op = card ? (card.operations || []).find(o => o.id === opId) : null;
+      if (!card || !op || !Array.isArray(op.additionalExecutors)) return;
+      if (idx < 0 || idx >= op.additionalExecutors.length) return;
+      const raw = (e.target.value || '').trim();
+      const value = sanitizeExecutorName(raw);
+      op.additionalExecutors[idx] = value;
+      updateExecutorCombo(input, { forceOpen: true });
     });
   });
 
