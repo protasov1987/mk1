@@ -3399,7 +3399,9 @@ function filterExecutorChoices(filter) {
 }
 
 function shouldUseCustomExecutorCombo() {
-  return window.matchMedia('(pointer: coarse)').matches || window.innerWidth <= 1024;
+  const pointerCoarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  const touchCapable = typeof navigator !== 'undefined' && Number(navigator.maxTouchPoints || 0) > 0;
+  return (pointerCoarse || touchCapable) && window.innerWidth <= 1024;
 }
 
 function updateExecutorCombo(input, { forceOpen = false } = {}) {
