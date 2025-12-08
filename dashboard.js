@@ -98,7 +98,7 @@
     const box = getMeasureBox();
     const width = getMeasureWidth();
     box.style.width = width + 'px';
-    box.innerHTML = '<div class="table-wrapper"><table>' + state.headerHtml + '<tbody>' + rows.join('') + '</tbody></table></div>';
+    box.innerHTML = '<table>' + state.headerHtml + '<tbody>' + rows.join('') + '</tbody></table>';
     return box.getBoundingClientRect().height;
   }
 
@@ -128,7 +128,7 @@
   }
 
   function buildTableHtml(rows) {
-    return '<div class="table-wrapper"><table>' + state.headerHtml + '<tbody>' + rows.join('') + '</tbody></table></div>';
+    return '<table>' + state.headerHtml + '<tbody>' + rows.join('') + '</tbody></table>';
   }
 
   function stopRotation() {

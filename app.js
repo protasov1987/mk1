@@ -6,7 +6,6 @@ let ops = [];
 let centers = [];
 let accessLevels = [];
 let users = [];
-let userPasswordCache = {};
 let workorderSearchTerm = '';
 let workorderStatusFilter = 'ALL';
 let workorderMissingExecutorFilter = 'ALL';
@@ -34,7 +33,6 @@ let dashboardEligibleCache = [];
 let workspaceSearchTerm = '';
 let workspaceStopContext = null;
 let workspaceActiveModalInput = null;
-let cardActiveSectionKey = 'main';
 const ACCESS_TAB_CONFIG = [
   { key: 'dashboard', label: 'Дашборд' },
   { key: 'cards', label: 'Тех. карты' },
@@ -45,60 +43,10 @@ const ACCESS_TAB_CONFIG = [
   { key: 'accessLevels', label: 'Уровни доступа' }
 ];
 const USER_DATALIST_ID = 'user-combobox-options';
-const FORBIDDEN_EXECUTOR = 'abyss';
-const USER_PASSWORD_CACHE_KEY = 'userPasswordCache';
 let currentUser = null;
 let appBootstrapped = false;
 let timersStarted = false;
 let inactivityTimer = null;
-
-function sanitizeExecutorName(name = '') {
-  if ((name || '').toLowerCase() === FORBIDDEN_EXECUTOR) return '';
-  return name;
-}
-
-function loadUserPasswordCache() {
-  try {
-    const stored = localStorage.getItem(USER_PASSWORD_CACHE_KEY);
-    userPasswordCache = stored ? JSON.parse(stored) || {} : {};
-  } catch (err) {
-    console.warn('Не удалось загрузить кэш паролей', err);
-    userPasswordCache = {};
-  }
-}
-
-function persistUserPasswordCache() {
-  try {
-    localStorage.setItem(USER_PASSWORD_CACHE_KEY, JSON.stringify(userPasswordCache));
-  } catch (err) {
-    console.warn('Не удалось сохранить кэш паролей', err);
-  }
-}
-
-function rememberUserPassword(userId, password) {
-  if (!userId || !password) return;
-  userPasswordCache[userId] = password;
-  persistUserPasswordCache();
-}
-
-function forgetMissingUserPasswords(activeUsers = []) {
-  const activeIds = new Set((activeUsers || []).map(u => u.id));
-  let changed = false;
-  Object.keys(userPasswordCache).forEach(id => {
-    if (!activeIds.has(id)) {
-      delete userPasswordCache[id];
-      changed = true;
-    }
-  });
-  if (changed) persistUserPasswordCache();
-}
-
-function resolveUserPassword(user) {
-  if (!user) return '';
-  if (user.password) return user.password;
-  const cached = userPasswordCache[user.id];
-  return cached || '';
-}
 
 function setConnectionStatus(message, variant = 'info') {
   const banner = document.getElementById('server-status');
@@ -253,10 +201,6 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
-}
-
-function wrapTable(tableHtml) {
-  return '<div class="table-wrapper">' + tableHtml + '</div>';
 }
 
 function formatSecondsToHMS(sec) {
@@ -1361,11 +1305,6 @@ async function loadSecurityData() {
     if (usersRes.ok) {
       const payload = await usersRes.json();
       users = Array.isArray(payload.users) ? payload.users : [];
-      users.forEach(u => {
-        const cached = resolveUserPassword(u);
-        if (cached) u.password = cached;
-      });
-      forgetMissingUserPasswords(users);
       renderUserDatalist();
     }
     if (levelsRes.ok) {
@@ -1694,7 +1633,7 @@ function renderDashboard() {
       emptyMessage
     });
   } else if (dashTableWrapper) {
-    dashTableWrapper.innerHTML = wrapTable('<table>' + tableHeader + '<tbody>' + rowsHtml.join('') + '</tbody></table>');
+    dashTableWrapper.innerHTML = '<table>' + tableHeader + '<tbody>' + rowsHtml.join('') + '</tbody></table>';
   }
 }
 
@@ -2121,92 +2060,6 @@ function createEmptyCardDraft() {
   };
 }
 
-function cardSectionLabel(sectionKey) {
-  const labels = {
-    main: 'Основная информация',
-    operations: 'Операции',
-    add: 'Добавление операций'
-  };
-  return labels[sectionKey] || labels.main;
-}
-
-function updateCardSectionsVisibility() {
-  const sections = document.querySelectorAll('#card-modal .card-section');
-  const isMobile = window.innerWidth <= 768;
-  sections.forEach(section => {
-    const key = section.dataset.section;
-    if (!key) return;
-    if (isMobile) {
-      const isActive = key === cardActiveSectionKey;
-      section.classList.toggle('active', isActive);
-      section.hidden = !isActive;
-    } else {
-      section.classList.add('active');
-      section.hidden = false;
-    }
-  });
-  updateCardSectionMenuItems();
-}
-
-function updateCardSectionMenuItems() {
-  const menu = document.getElementById('card-section-menu');
-  if (!menu) return;
-  menu.querySelectorAll('.card-section-menu-item[data-section-target]').forEach(item => {
-    const key = item.getAttribute('data-section-target');
-    const shouldHide = key === cardActiveSectionKey;
-    item.classList.toggle('hidden', shouldHide);
-    item.setAttribute('aria-hidden', shouldHide ? 'true' : 'false');
-    item.tabIndex = shouldHide ? -1 : 0;
-  });
-}
-
-function setActiveCardSection(sectionKey = 'main') {
-  cardActiveSectionKey = sectionKey;
-  const labelEl = document.getElementById('card-mobile-active-label');
-  if (labelEl) {
-    labelEl.textContent = cardSectionLabel(cardActiveSectionKey);
-  }
-  updateCardSectionMenuItems();
-  updateCardSectionsVisibility();
-}
-
-function closeCardSectionMenu() {
-  const toggle = document.getElementById('card-section-menu-toggle');
-  const menu = document.getElementById('card-section-menu');
-  if (menu) menu.classList.remove('open');
-  if (toggle) toggle.setAttribute('aria-expanded', 'false');
-}
-
-function setupCardSectionMenu() {
-  const toggle = document.getElementById('card-section-menu-toggle');
-  const menu = document.getElementById('card-section-menu');
-  if (!toggle || !menu) return;
-
-  toggle.addEventListener('click', () => {
-    const isOpen = menu.classList.toggle('open');
-    toggle.setAttribute('aria-expanded', String(isOpen));
-  });
-
-  menu.addEventListener('click', e => {
-    const target = e.target.closest('button');
-    if (!target) return;
-    const sectionKey = target.getAttribute('data-section-target');
-    const actionTarget = target.getAttribute('data-action-target');
-    if (sectionKey) {
-      setActiveCardSection(sectionKey);
-      closeCardSectionMenu();
-      return;
-    }
-    if (actionTarget) {
-      const btn = document.getElementById(actionTarget);
-      if (btn) btn.click();
-      closeCardSectionMenu();
-    }
-  });
-
-  window.addEventListener('resize', () => updateCardSectionsVisibility());
-}
-
 function openCardModal(cardId) {
   const modal = document.getElementById('card-modal');
   if (!modal) return;
@@ -2251,8 +2104,6 @@ function openCardModal(cardId) {
   if (routeQtyInput) routeQtyInput.value = activeCardDraft.quantity !== '' ? activeCardDraft.quantity : '';
   renderRouteTableDraft();
   fillRouteSelectors();
-  setActiveCardSection('main');
-  closeCardSectionMenu();
   modal.classList.remove('hidden');
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -2441,7 +2292,7 @@ function renderAttachmentsModal() {
         '</tr>';
     });
     html += '</tbody></table>';
-    list.innerHTML = wrapTable(html);
+    list.innerHTML = html;
   }
   uploadHint.textContent = 'Допустимые форматы: pdf, doc, jpg, архив. Максимум ' + formatBytes(ATTACH_MAX_SIZE) + '.';
 
@@ -2627,19 +2478,12 @@ function applyGroupExecutorToGroup() {
   const opCodeInput = document.getElementById('group-op-code-input');
   if (!groupExecutorContext) return;
 
-  const rawExecutor = (executorInput ? executorInput.value : '').trim();
-  const executor = sanitizeExecutorName(rawExecutor);
+  const executor = (executorInput ? executorInput.value : '').trim();
   const opCodeRaw = (opCodeInput ? opCodeInput.value : '').trim();
   const group = cards.find(c => c.id === groupExecutorContext.groupId && isGroupCard(c));
 
   if (!group) {
     closeGroupExecutorModal();
-    return;
-  }
-
-  if (!executor && rawExecutor) {
-    alert('Пользователь Abyss недоступен для выбора. Выберите другого исполнителя.');
-    if (executorInput) executorInput.value = '';
     return;
   }
 
@@ -2789,10 +2633,6 @@ function buildSummaryTable(card) {
 
   opsSorted.forEach((op, idx) => {
     normalizeOperationItems(card, op);
-    op.executor = sanitizeExecutorName(op.executor || '');
-    if (Array.isArray(op.additionalExecutors)) {
-      op.additionalExecutors = op.additionalExecutors.map(name => sanitizeExecutorName(name || '')).filter(Boolean);
-    }
     const rowId = card.id + '::' + op.id;
     const elapsed = getOperationElapsedSeconds(op);
     let timeCell = '';
@@ -2868,8 +2708,7 @@ function buildInitialSnapshotHtml(card) {
     '<div><strong>Описание:</strong> ' + escapeHtml(snapshot.desc || '') + '</div>' +
     '</div>';
   const opsHtml = buildInitialSummaryTable(snapshot);
-  const wrappedOps = opsHtml.trim().startsWith('<table') ? wrapTable(opsHtml) : opsHtml;
-  return metaHtml + wrappedOps;
+  return metaHtml + opsHtml;
 }
 
 function renderInitialSnapshot(card) {
@@ -3289,9 +3128,13 @@ function moveRouteOpInDraft(ropId, delta) {
   renumberAutoCodesForCard(activeCardDraft);
 }
 
-function getFilteredRouteSources() {
+function fillRouteSelectors() {
   const opInput = document.getElementById('route-op');
   const centerInput = document.getElementById('route-center');
+  const opList = document.getElementById('route-op-options');
+  const centerList = document.getElementById('route-center-options');
+  if (!opList || !centerList) return;
+
   const opFilter = (opInput ? opInput.value : '').toLowerCase();
   const centerFilter = (centerInput ? centerInput.value : '').toLowerCase();
 
@@ -3308,58 +3151,6 @@ function getFilteredRouteSources() {
     return name.includes(centerFilter) || desc.includes(centerFilter);
   });
 
-  return { filteredOps, filteredCenters };
-}
-
-function updateRouteCombo(kind, items, { forceOpen = false } = {}) {
-  const containerId = kind === 'center' ? 'route-center-suggestions' : 'route-op-suggestions';
-  const inputId = kind === 'center' ? 'route-center' : 'route-op';
-  const container = document.getElementById(containerId);
-  const input = document.getElementById(inputId);
-  if (!container || !input) return;
-
-  if (window.innerWidth > 768) {
-    container.classList.remove('open');
-    container.innerHTML = '';
-    return;
-  }
-
-  container.innerHTML = '';
-  if (!items || !items.length) {
-    container.classList.remove('open');
-    return;
-  }
-
-  items.forEach(item => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'combo-option';
-    btn.textContent = kind === 'center' ? (item.name || '') : formatOpLabel(item);
-    btn.addEventListener('click', () => {
-      input.value = btn.textContent;
-      container.classList.remove('open');
-      fillRouteSelectors();
-      input.focus();
-    });
-    container.appendChild(btn);
-  });
-
-  const shouldOpen = forceOpen || container.classList.contains('open');
-  container.classList.toggle('open', shouldOpen);
-}
-
-function hideRouteCombos() {
-  const containers = document.querySelectorAll('.combo-suggestions');
-  containers.forEach(el => el.classList.remove('open'));
-}
-
-function fillRouteSelectors() {
-  const opList = document.getElementById('route-op-options');
-  const centerList = document.getElementById('route-center-options');
-  if (!opList || !centerList) return;
-
-  const { filteredOps, filteredCenters } = getFilteredRouteSources();
-
   opList.innerHTML = '';
   filteredOps.forEach(o => {
     const opt = document.createElement('option');
@@ -3375,9 +3166,6 @@ function fillRouteSelectors() {
     opt.dataset.id = c.id;
     centerList.appendChild(opt);
   });
-
-  updateRouteCombo('op', filteredOps);
-  updateRouteCombo('center', filteredCenters);
 }
 
 // === СПРАВОЧНИКИ ===
@@ -3486,7 +3274,6 @@ function buildWorkorderCardDetails(card, { opened = false, allowArchive = true, 
   const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-allow-view="true" data-card-id="' + card.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
   const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-card-id="' + card.id + '" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
   const logButton = showLog ? ' <button type="button" class="btn-small btn-secondary log-btn" data-allow-view="true" data-log-card="' + card.id + '">Log</button>' : '';
-  const inlineActions = '<span class="summary-inline-actions">' + barcodeButton + filesButton + logButton + '</span>';
   const nameLabel = formatCardNameWithGroupPosition(card);
 
   let html = '<details class="wo-card" data-card-id="' + card.id + '"' + (opened ? ' open' : '') + '>' +
@@ -3496,7 +3283,7 @@ function buildWorkorderCardDetails(card, { opened = false, allowArchive = true, 
     '<strong>' + nameLabel + '</strong>' +
     ' <span class="summary-sub">' +
     (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') + contractText +
-    inlineActions +
+    barcodeButton + filesButton + logButton +
     '</span>' +
     '</div>' +
     '<div class="summary-actions">' +
@@ -3548,7 +3335,6 @@ function buildWorkspaceGroupDetails(group) {
   const filesCount = (group.attachments || []).length;
   const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-attach-card="' + group.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
   const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-card-id="' + group.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
-  const inlineActions = '<span class="summary-inline-actions workorder-inline-actions">' + barcodeButton + filesButton + '</span>';
 
   const childrenHtml = children.length
     ? children.map(child => buildWorkspaceCardDetails(child, { opened: true })).join('')
@@ -3561,7 +3347,7 @@ function buildWorkspaceGroupDetails(group) {
     '<strong><span class="group-marker">(Г)</span>' + escapeHtml(group.name || group.id) + '</strong>' +
     ' <span class="summary-sub">' +
     (group.orderNo ? ' (Заказ: ' + escapeHtml(group.orderNo) + ')' : '') + contractText +
-    inlineActions +
+    barcodeButton + filesButton +
     '</span>' +
     '</div>' +
     '<div class="summary-actions">' + stateBadge + '</div>' +
@@ -3684,10 +3470,6 @@ function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = fa
 
   opsSorted.forEach((op, idx) => {
     normalizeOperationItems(card, op);
-    op.executor = sanitizeExecutorName(op.executor || '');
-    if (Array.isArray(op.additionalExecutors)) {
-      op.additionalExecutors = op.additionalExecutors.map(name => sanitizeExecutorName(name || '')).filter(Boolean);
-    }
     const rowId = card.id + '::' + op.id;
     const elapsed = getOperationElapsedSeconds(op);
     let timeCell = '';
@@ -3750,7 +3532,7 @@ function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = fa
   });
 
   html += '</tbody></table>';
-  return '<div class="table-wrapper operations-table-wrapper">' + html + '</div>';
+  return html;
 }
 
 function formatQuantityValue(val) {
@@ -4018,12 +3800,6 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       const contractText = card.contractNumber ? ' (Договор: ' + escapeHtml(card.contractNumber) + ')' : '';
       const barcodeButton = ' <button type="button" class="btn-small btn-secondary barcode-view-btn" data-card-id="' + card.id + '" title="Показать штрихкод" aria-label="Показать штрихкод">Штрихкод</button>';
       const filesButton = ' <button type="button" class="btn-small clip-btn inline-clip" data-card-id="' + card.id + '" data-attach-card="' + card.id + '">📎 <span class="clip-count">' + filesCount + '</span></button>';
-      const inlineActions = '<span class="summary-inline-actions workorder-inline-actions">' + barcodeButton + filesButton + '</span>';
-      const statusRow = '<div class="group-status-row">' +
-        (missingBadge ? missingBadge + ' ' : '') +
-        stateBadge +
-        (groupExecutorBtn ? ' ' + groupExecutorBtn : '') +
-        '</div>';
       const childrenHtml = children.length
         ? children.map(child => buildWorkorderCardDetails(child, { opened: !collapseAll && workorderOpenCards.has(child.id), allowArchive: false, readonly })).join('')
         : '<p class="group-empty">В группе нет карт для отображения.</p>';
@@ -4035,11 +3811,11 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
         '<strong><span class="group-marker">(Г)</span>' + escapeHtml(card.name || card.id) + '</strong>' +
         ' <span class="summary-sub">' +
         (card.orderNo ? ' (Заказ: ' + escapeHtml(card.orderNo) + ')' : '') + contractText +
-        inlineActions +
+        barcodeButton + filesButton +
         '</span>' +
         '</div>' +
-        '<div class="summary-actions group-summary-actions">' +
-        statusRow +
+        '<div class="summary-actions">' +
+        groupExecutorBtn + ' ' + (missingBadge ? missingBadge + ' ' : '') + stateBadge +
         (!readonly && card.status === 'DONE' ? ' <button type="button" class="btn-small btn-secondary archive-group-btn" data-group-id="' + card.id + '">Перенести в архив</button>' : '') +
         '</div>' +
         '</div>' +
@@ -4207,10 +3983,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       const card = cards.find(c => c.id === cardId);
       const op = card ? (card.operations || []).find(o => o.id === opId) : null;
       if (!op) return;
-      op.executor = sanitizeExecutorName((e.target.value || '').trim());
-      if (!op.executor && (e.target.value || '').trim()) {
-        e.target.value = '';
-      }
+      op.executor = (e.target.value || '').trim();
     });
     input.addEventListener('blur', e => {
       const cardId = input.getAttribute('data-card-id');
@@ -4218,13 +3991,8 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       const card = cards.find(c => c.id === cardId);
       const op = card ? (card.operations || []).find(o => o.id === opId) : null;
       if (!op || !card) return;
-      const raw = (e.target.value || '').trim();
-      const value = sanitizeExecutorName(raw);
+      const value = (e.target.value || '').trim();
       const prev = input.dataset.prevVal || '';
-      if (!value && raw) {
-        alert('Пользователь Abyss недоступен для выбора. Выберите другого исполнителя.');
-        e.target.value = '';
-      }
       op.executor = value;
       if (prev !== value) {
         recordCardLog(card, { action: 'Исполнитель', object: opLogLabel(op), field: 'executor', targetId: op.id, oldValue: prev, newValue: value });
@@ -4295,13 +4063,8 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       const card = cards.find(c => c.id === cardId);
       const op = card ? (card.operations || []).find(o => o.id === opId) : null;
       if (!card || !op || !Array.isArray(op.additionalExecutors)) return;
-      const raw = (e.target.value || '').trim();
-      const value = sanitizeExecutorName(raw);
+      const value = (e.target.value || '').trim();
       const prev = input.dataset.prevVal || '';
-      if (!value && raw) {
-        alert('Пользователь Abyss недоступен для выбора. Выберите другого исполнителя.');
-        e.target.value = '';
-      }
       if (idx < 0 || idx >= op.additionalExecutors.length) return;
       op.additionalExecutors[idx] = value;
       if (prev !== value) {
@@ -4790,11 +4553,11 @@ function tickTimers() {
     const card = row.card;
     const op = row.op;
     const rowId = card.id + '::' + op.id;
-    const spans = document.querySelectorAll('.wo-timer[data-row-id="' + rowId + '"]');
-    const elapsedSec = getOperationElapsedSeconds(op);
-    spans.forEach(span => {
+    const span = document.querySelector('.wo-timer[data-row-id="' + rowId + '"]');
+    if (span) {
+      const elapsedSec = getOperationElapsedSeconds(op);
       span.textContent = formatSecondsToHMS(elapsedSec);
-    });
+    }
   });
 
   refreshCardStatuses();
@@ -4920,8 +4683,6 @@ function setupForms() {
   document.getElementById('btn-new-card').addEventListener('click', () => {
     openCardModal();
   });
-
-  setupCardSectionMenu();
 
   const cardForm = document.getElementById('card-form');
   if (cardForm) {
@@ -5069,42 +4830,6 @@ function setupForms() {
     if (opInput) opInput.value = '';
     if (centerInput) centerInput.value = '';
     fillRouteSelectors();
-  });
-
-  const routeOpInput = document.getElementById('route-op');
-  if (routeOpInput) {
-    const openOpList = () => {
-      const { filteredOps } = getFilteredRouteSources();
-      updateRouteCombo('op', filteredOps, { forceOpen: true });
-    };
-    routeOpInput.addEventListener('input', () => fillRouteSelectors());
-    routeOpInput.addEventListener('focus', openOpList);
-    routeOpInput.addEventListener('click', openOpList);
-  }
-
-  const routeCenterInput = document.getElementById('route-center');
-  if (routeCenterInput) {
-    const openCenterList = () => {
-      const { filteredCenters } = getFilteredRouteSources();
-      updateRouteCombo('center', filteredCenters, { forceOpen: true });
-    };
-    routeCenterInput.addEventListener('input', () => fillRouteSelectors());
-    routeCenterInput.addEventListener('focus', openCenterList);
-    routeCenterInput.addEventListener('click', openCenterList);
-  }
-
-  document.addEventListener('click', e => {
-    if (!e.target.closest('.combo-field')) {
-      hideRouteCombos();
-    }
-  });
-
-  window.addEventListener('resize', () => {
-    if (window.innerWidth > 768) {
-      hideRouteCombos();
-    } else {
-      fillRouteSelectors();
-    }
   });
 
   const routeQtyField = document.getElementById('route-qty');
@@ -5414,6 +5139,7 @@ function renderUsersTable() {
     rows += '<tr>' +
       '<td>' + escapeHtml(u.name || '') + '</td>' +
       '<td>' + escapeHtml(level ? level.name : 'Не задан') + '</td>' +
+      '<td>' + escapeHtml(u.status || 'active') + '</td>' +
       '<td>' + (u.permissions && u.permissions.worker ? 'Да' : 'Нет') + '</td>' +
       '<td class="action-col">' +
         (canEditTab('users') ? '<button class="btn-secondary user-edit" data-id="' + u.id + '">Редактировать</button>' : '') +
@@ -5421,7 +5147,7 @@ function renderUsersTable() {
       '</td>' +
     '</tr>';
   });
-  container.innerHTML = '<table class="security-table"><thead><tr><th>Имя</th><th>Уровень</th><th>Рабочий</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
+  container.innerHTML = '<table class="security-table"><thead><tr><th>Имя</th><th>Уровень</th><th>Статус</th><th>Рабочий</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
 
   container.querySelectorAll('.user-edit').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -5489,13 +5215,8 @@ function openUserModal(user) {
   modal.classList.remove('hidden');
   document.getElementById('user-id').value = user ? user.id : '';
   document.getElementById('user-name').value = user ? user.name || '' : '';
-  const pwdInput = document.getElementById('user-password');
-  if (pwdInput) {
-    pwdInput.setAttribute('type', 'password');
-    const resolvedPassword = resolveUserPassword(user);
-    pwdInput.value = resolvedPassword;
-    pwdInput.dataset.initialPassword = resolvedPassword || '';
-  }
+  document.getElementById('user-password').value = '';
+  document.getElementById('user-status').value = user ? (user.status || 'active') : 'active';
   const select = document.getElementById('user-access-level');
   if (select) {
     select.innerHTML = accessLevels.map(l => '<option value="' + l.id + '">' + escapeHtml(l.name || '') + '</option>').join('');
@@ -5523,8 +5244,7 @@ function renderUserDatalist() {
     list.id = USER_DATALIST_ID;
     document.body.appendChild(list);
   }
-  const filteredUsers = users.filter(u => (u.name || '').toLowerCase() !== 'abyss');
-  list.innerHTML = filteredUsers.map(u => '<option value="' + escapeHtml(u.name || '') + '"></option>').join('');
+  list.innerHTML = users.map(u => '<option value="' + escapeHtml(u.name || '') + '"></option>').join('');
 }
 
 function closeUserModal() {
@@ -5540,14 +5260,12 @@ function closeAccessLevelModal() {
 async function saveUserFromModal() {
   const id = document.getElementById('user-id').value;
   const name = document.getElementById('user-name').value;
-  const passwordInput = document.getElementById('user-password');
-  const initialPassword = passwordInput ? (passwordInput.dataset.initialPassword || '') : '';
-  const password = passwordInput ? passwordInput.value.trim() : '';
+  const password = document.getElementById('user-password').value;
   const accessLevelId = document.getElementById('user-access-level').value;
+  const status = document.getElementById('user-status').value;
   const errorEl = document.getElementById('user-error');
   if (errorEl) { errorEl.textContent = ''; }
-  const passwordChanged = !!password && password !== initialPassword;
-  const payload = { name, password: passwordChanged ? password : undefined, accessLevelId, status: 'active' };
+  const payload = { name, password: password || undefined, accessLevelId, status };
   const method = id ? 'PUT' : 'POST';
   const url = id ? '/api/security/users/' + id : '/api/security/users';
   const res = await fetch(url, { method, credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -5557,11 +5275,6 @@ async function saveUserFromModal() {
     return;
   }
   await loadSecurityData();
-  const updatedUser = id ? users.find(u => u.id === id) : users.find(u => (u.name || '') === name);
-  const effectivePassword = passwordChanged ? password : (initialPassword || resolveUserPassword(updatedUser));
-  if (updatedUser && effectivePassword) {
-    rememberUserPassword(updatedUser.id, effectivePassword);
-  }
   renderUsersTable();
   closeUserModal();
 }
@@ -5629,16 +5342,6 @@ function setupSecurityControls() {
       if (input) input.value = pwd;
     });
   }
-  const passwordToggle = document.getElementById('user-password-visibility');
-  if (passwordToggle) {
-    passwordToggle.addEventListener('click', () => {
-      const input = document.getElementById('user-password');
-      if (!input) return;
-      const isHidden = input.getAttribute('type') === 'password';
-      input.setAttribute('type', isHidden ? 'text' : 'password');
-      passwordToggle.setAttribute('aria-label', isHidden ? 'Скрыть пароль' : 'Показать пароль');
-    });
-  }
   const userBarcode = document.getElementById('user-barcode');
   if (userBarcode) {
     userBarcode.addEventListener('click', () => {
@@ -5654,7 +5357,6 @@ function setupSecurityControls() {
 
 // === ИНИЦИАЛИЗАЦИЯ ===
 document.addEventListener('DOMContentLoaded', async () => {
-  loadUserPasswordCache();
   setupResponsiveNav();
   startRealtimeClock();
   setupAuthControls();
