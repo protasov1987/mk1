@@ -1909,6 +1909,22 @@ footer {
   }
 }
 
+@media (min-width: 1024px) {
+  /* Desktop tracker/workspace/archive cards should fill the viewport instead of forcing inner scrollbars */
+  #workorders .table-wrapper,
+  #archive .table-wrapper,
+  #workspace .table-wrapper {
+    overflow-x: visible;
+  }
+
+  #workorders .table-wrapper table,
+  #archive .table-wrapper table,
+  #workspace .table-wrapper table {
+    min-width: 0;
+    width: 100%;
+  }
+}
+
 @media (max-width: 600px) {
   header {
     display: grid;
