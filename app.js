@@ -52,6 +52,32 @@ let appBootstrapped = false;
 let timersStarted = false;
 let inactivityTimer = null;
 
+function isActiveWorker(user) {
+  if (!user || typeof user !== 'object') return false;
+  const normalizedStatus = (user.status || 'active').toLowerCase();
+  if (normalizedStatus === 'deleted' || normalizedStatus === 'disabled' || normalizedStatus === 'inactive') return false;
+  return !!(user.permissions && user.permissions.worker);
+}
+
+function getEligibleExecutorUsers() {
+  return (users || []).filter(u => {
+    const name = (u && u.name ? u.name : '').trim();
+    if (!name) return false;
+    if (name.toLowerCase() === FORBIDDEN_EXECUTOR) return false;
+    return isActiveWorker(u);
+  });
+}
+
+function getEligibleExecutorNames() {
+  return getEligibleExecutorUsers().map(u => u.name || '').filter(Boolean);
+}
+
+function isEligibleExecutorName(name) {
+  const normalized = (name || '').trim().toLowerCase();
+  if (!normalized || normalized === FORBIDDEN_EXECUTOR) return false;
+  return getEligibleExecutorNames().some(n => (n || '').trim().toLowerCase() === normalized);
+}
+
 function sanitizeExecutorName(name = '') {
   if ((name || '').toLowerCase() === FORBIDDEN_EXECUTOR) return '';
   return name;
@@ -2637,6 +2663,12 @@ function applyGroupExecutorToGroup() {
     return;
   }
 
+  if (executor && !isEligibleExecutorName(executor)) {
+    alert('Выберите исполнителя со статусом "Рабочий" (пользователь Abyss недоступен).');
+    if (executorInput) executorInput.value = '';
+    return;
+  }
+
   if (!executor && rawExecutor) {
     alert('Пользователь Abyss недоступен для выбора. Выберите другого исполнителя.');
     if (executorInput) executorInput.value = '';
@@ -3360,11 +3392,7 @@ function hideRouteCombos() {
 
 function filterExecutorChoices(filter) {
   const term = (filter || '').toLowerCase();
-  const source = Array.isArray(users) ? users : [];
-  return source
-    .map(u => (u && u.name ? u.name : ''))
-    .filter(Boolean)
-    .filter(name => name.toLowerCase() !== 'abyss')
+  return getEligibleExecutorNames()
     .filter(name => !term || name.toLowerCase().includes(term))
     .slice(0, 30);
 }
@@ -4342,6 +4370,13 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       const raw = (e.target.value || '').trim();
       const value = sanitizeExecutorName(raw);
       const prev = input.dataset.prevVal || '';
+      if (value && !isEligibleExecutorName(value)) {
+        alert('Выберите исполнителя со статусом "Рабочий" (пользователь Abyss недоступен).');
+        e.target.value = '';
+        op.executor = '';
+        updateExecutorCombo(input);
+        return;
+      }
       if (!value && raw) {
         alert('Пользователь Abyss недоступен для выбора. Выберите другого исполнителя.');
         e.target.value = '';
@@ -4423,6 +4458,15 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       const raw = (e.target.value || '').trim();
       const value = sanitizeExecutorName(raw);
       const prev = input.dataset.prevVal || '';
+      if (value && !isEligibleExecutorName(value)) {
+        alert('Выберите исполнителя со статусом "Рабочий" (пользователь Abyss недоступен).');
+        e.target.value = '';
+        if (idx >= 0 && idx < op.additionalExecutors.length) {
+          op.additionalExecutors[idx] = '';
+        }
+        updateExecutorCombo(input);
+        return;
+      }
       if (!value && raw) {
         alert('Пользователь Abyss недоступен для выбора. Выберите другого исполнителя.');
         e.target.value = '';
@@ -5662,7 +5706,7 @@ function renderUserDatalist() {
     list.id = USER_DATALIST_ID;
     document.body.appendChild(list);
   }
-  const filteredUsers = users.filter(u => (u.name || '').toLowerCase() !== 'abyss');
+  const filteredUsers = getEligibleExecutorUsers();
   list.innerHTML = filteredUsers.map(u => '<option value="' + escapeHtml(u.name || '') + '"></option>').join('');
 }
 
