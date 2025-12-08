@@ -1341,6 +1341,7 @@ async function loadData() {
 
   ensureDefaults();
   ensureOperationCodes();
+  renderUserDatalist();
 
   cards.forEach(c => {
     if (!c.barcode || !/^\d{13}$/.test(c.barcode)) {
@@ -3454,7 +3455,35 @@ function repositionOpenExecutorSuggestions() {
   });
 }
 
-window.addEventListener('resize', repositionOpenExecutorSuggestions);
+function syncExecutorComboboxMode() {
+  const isDesktop = window.innerWidth > 768;
+  const inputs = document.querySelectorAll('.executor-main-input, .additional-executor-input');
+  inputs.forEach(input => {
+    if (isDesktop) {
+      if (input.getAttribute('list') !== USER_DATALIST_ID) {
+        input.setAttribute('list', USER_DATALIST_ID);
+      }
+    } else {
+      if (input.hasAttribute('list')) {
+        input.removeAttribute('list');
+      }
+    }
+  });
+
+  document.querySelectorAll('.executor-suggestions').forEach(container => {
+    if (isDesktop) {
+      container.classList.remove('open');
+      resetExecutorSuggestionPosition(container);
+    }
+  });
+}
+
+function handleExecutorViewportChange() {
+  syncExecutorComboboxMode();
+  repositionOpenExecutorSuggestions();
+}
+
+window.addEventListener('resize', handleExecutorViewportChange);
 window.addEventListener('scroll', repositionOpenExecutorSuggestions, true);
 
 function fillRouteSelectors() {
@@ -4553,10 +4582,10 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
     });
   });
 
-  wrapper.querySelectorAll('button[data-action]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      if (readonly) return;
-      const action = btn.getAttribute('data-action');
+    wrapper.querySelectorAll('button[data-action]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (readonly) return;
+        const action = btn.getAttribute('data-action');
       const cardId = btn.getAttribute('data-card-id');
       const opId = btn.getAttribute('data-op-id');
       const card = cards.find(c => c.id === cardId);
@@ -4568,15 +4597,16 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
         workorderOpenCards.add(cardId);
       }
 
-      const anchorGroupId = detail ? detail.getAttribute('data-group-id') : null;
-      applyOperationAction(action, card, op, { anchorGroupId });
+        const anchorGroupId = detail ? detail.getAttribute('data-group-id') : null;
+        applyOperationAction(action, card, op, { anchorGroupId });
+      });
     });
-  });
 
-  applyReadonlyState('workorders', 'workorders');
-}
+    syncExecutorComboboxMode();
+    applyReadonlyState('workorders', 'workorders');
+  }
 
-function renderWorkspaceView() {
+  function renderWorkspaceView() {
   const wrapper = document.getElementById('workspace-results');
   if (!wrapper) return;
   const readonly = isTabReadonly('workspace');
