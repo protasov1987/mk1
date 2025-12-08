@@ -2824,7 +2824,11 @@ function buildSummaryTable(card) {
     normalizeOperationItems(card, op);
     op.executor = sanitizeExecutorName(op.executor || '');
     if (Array.isArray(op.additionalExecutors)) {
-      op.additionalExecutors = op.additionalExecutors.map(name => sanitizeExecutorName(name || '')).filter(Boolean);
+      op.additionalExecutors = op.additionalExecutors
+        .map(name => sanitizeExecutorName(name || ''))
+        .slice(0, 2);
+    } else {
+      op.additionalExecutors = [];
     }
     const rowId = card.id + '::' + op.id;
     const elapsed = getOperationElapsedSeconds(op);
@@ -3867,7 +3871,11 @@ function buildOperationsTable(card, { readonly = false, quantityPrintBlanks = fa
     normalizeOperationItems(card, op);
     op.executor = sanitizeExecutorName(op.executor || '');
     if (Array.isArray(op.additionalExecutors)) {
-      op.additionalExecutors = op.additionalExecutors.map(name => sanitizeExecutorName(name || '')).filter(Boolean);
+      op.additionalExecutors = op.additionalExecutors
+        .map(name => sanitizeExecutorName(name || ''))
+        .slice(0, 2);
+    } else {
+      op.additionalExecutors = [];
     }
     const rowId = card.id + '::' + op.id;
     const elapsed = getOperationElapsedSeconds(op);
