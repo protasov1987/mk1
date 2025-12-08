@@ -3398,11 +3398,22 @@ function filterExecutorChoices(filter) {
     .slice(0, 30);
 }
 
+function shouldUseCustomExecutorCombo() {
+  return window.matchMedia('(pointer: coarse)').matches || window.innerWidth <= 1024;
+}
+
 function updateExecutorCombo(input, { forceOpen = false } = {}) {
   if (!input) return;
   const combo = input.closest('.executor-combo');
   const container = combo ? combo.querySelector('.executor-suggestions') : null;
   if (!container) return;
+
+  if (!shouldUseCustomExecutorCombo()) {
+    container.classList.remove('open');
+    container.innerHTML = '';
+    resetExecutorSuggestionPosition(container);
+    return;
+  }
 
   const options = filterExecutorChoices(input.value);
   container.innerHTML = '';
@@ -3418,6 +3429,7 @@ function updateExecutorCombo(input, { forceOpen = false } = {}) {
     btn.className = 'combo-option';
     btn.textContent = name;
     btn.addEventListener('mousedown', e => e.preventDefault());
+    btn.addEventListener('pointerdown', e => e.preventDefault());
     btn.addEventListener('click', () => {
       input.value = name;
       input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -3437,7 +3449,7 @@ function updateExecutorCombo(input, { forceOpen = false } = {}) {
 }
 
 function repositionOpenExecutorSuggestions() {
-  if (window.innerWidth > 768) return;
+  if (!shouldUseCustomExecutorCombo()) return;
   const openContainers = document.querySelectorAll('.executor-suggestions.open');
   openContainers.forEach(container => {
     const combo = container.closest('.executor-combo');
@@ -3449,22 +3461,22 @@ function repositionOpenExecutorSuggestions() {
 }
 
 function syncExecutorComboboxMode() {
-  const isDesktop = window.innerWidth > 768;
+  const useCustom = shouldUseCustomExecutorCombo();
   const inputs = document.querySelectorAll('.executor-main-input, .additional-executor-input');
   inputs.forEach(input => {
-    if (isDesktop) {
-      if (input.getAttribute('list') !== USER_DATALIST_ID) {
-        input.setAttribute('list', USER_DATALIST_ID);
-      }
-    } else {
+    if (useCustom) {
       if (input.hasAttribute('list')) {
         input.removeAttribute('list');
+      }
+    } else {
+      if (input.getAttribute('list') !== USER_DATALIST_ID) {
+        input.setAttribute('list', USER_DATALIST_ID);
       }
     }
   });
 
   document.querySelectorAll('.executor-suggestions').forEach(container => {
-    if (isDesktop) {
+    if (!useCustom) {
       container.classList.remove('open');
       resetExecutorSuggestionPosition(container);
     }
@@ -3517,7 +3529,7 @@ function resetExecutorSuggestionPosition(container) {
 }
 
 function positionExecutorSuggestions(container, input) {
-  if (!container || !input || window.innerWidth > 768) {
+  if (!container || !input || !shouldUseCustomExecutorCombo()) {
     resetExecutorSuggestionPosition(container);
     return;
   }
@@ -4371,6 +4383,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       openSuggestions();
     });
     input.addEventListener('click', openSuggestions);
+    input.addEventListener('touchstart', openSuggestions);
     input.addEventListener('input', e => {
       const cardId = input.getAttribute('data-card-id');
       const opId = input.getAttribute('data-op-id');
@@ -4470,6 +4483,7 @@ function renderWorkordersTable({ collapseAll = false } = {}) {
       openSuggestions();
     });
     input.addEventListener('click', openSuggestions);
+    input.addEventListener('touchstart', openSuggestions);
     input.addEventListener('blur', e => {
       const cardId = input.getAttribute('data-card-id');
       const opId = input.getAttribute('data-op-id');
