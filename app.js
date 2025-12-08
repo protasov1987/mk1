@@ -3350,7 +3350,12 @@ function updateRouteCombo(kind, items, { forceOpen = false } = {}) {
 
 function hideRouteCombos() {
   const containers = document.querySelectorAll('.combo-suggestions');
-  containers.forEach(el => el.classList.remove('open'));
+  containers.forEach(el => {
+    el.classList.remove('open');
+    if (el.classList.contains('executor-suggestions')) {
+      resetExecutorSuggestionPosition(el);
+    }
+  });
 }
 
 function filterExecutorChoices(filter) {
@@ -3373,6 +3378,7 @@ function updateExecutorCombo(input, { forceOpen = false } = {}) {
   if (window.innerWidth > 768) {
     container.classList.remove('open');
     container.innerHTML = '';
+    resetExecutorSuggestionPosition(container);
     return;
   }
 
@@ -3380,6 +3386,7 @@ function updateExecutorCombo(input, { forceOpen = false } = {}) {
   container.innerHTML = '';
   if (!options.length) {
     container.classList.remove('open');
+    resetExecutorSuggestionPosition(container);
     return;
   }
 
@@ -3400,7 +3407,27 @@ function updateExecutorCombo(input, { forceOpen = false } = {}) {
 
   const shouldOpen = forceOpen || container.classList.contains('open');
   container.classList.toggle('open', shouldOpen);
+  if (shouldOpen) {
+    positionExecutorSuggestions(container, input);
+  } else {
+    resetExecutorSuggestionPosition(container);
+  }
 }
+
+function repositionOpenExecutorSuggestions() {
+  if (window.innerWidth > 768) return;
+  const openContainers = document.querySelectorAll('.executor-suggestions.open');
+  openContainers.forEach(container => {
+    const combo = container.closest('.executor-combo');
+    const input = combo ? combo.querySelector('input[type="text"]') : null;
+    if (input) {
+      positionExecutorSuggestions(container, input);
+    }
+  });
+}
+
+window.addEventListener('resize', repositionOpenExecutorSuggestions);
+window.addEventListener('scroll', repositionOpenExecutorSuggestions, true);
 
 function fillRouteSelectors() {
   const opList = document.getElementById('route-op-options');
@@ -3427,6 +3454,40 @@ function fillRouteSelectors() {
 
   updateRouteCombo('op', filteredOps);
   updateRouteCombo('center', filteredCenters);
+}
+
+function resetExecutorSuggestionPosition(container) {
+  if (!container) return;
+  container.style.position = '';
+  container.style.left = '';
+  container.style.top = '';
+  container.style.width = '';
+  container.style.maxWidth = '';
+  container.style.zIndex = '';
+}
+
+function positionExecutorSuggestions(container, input) {
+  if (!container || !input || window.innerWidth > 768) {
+    resetExecutorSuggestionPosition(container);
+    return;
+  }
+
+  const rect = input.getBoundingClientRect();
+  const viewportPadding = 6;
+  const availableWidth = window.innerWidth - viewportPadding * 2;
+  const targetWidth = Math.min(rect.width, availableWidth);
+  const left = Math.min(
+    Math.max(viewportPadding, rect.left + window.scrollX),
+    window.scrollX + window.innerWidth - targetWidth - viewportPadding
+  );
+  const top = rect.bottom + window.scrollY + 4;
+
+  container.style.position = 'fixed';
+  container.style.left = `${left}px`;
+  container.style.top = `${top}px`;
+  container.style.width = `${targetWidth}px`;
+  container.style.maxWidth = `${availableWidth}px`;
+  container.style.zIndex = '1400';
 }
 
 // === СПРАВОЧНИКИ ===

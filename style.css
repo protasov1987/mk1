@@ -461,6 +461,7 @@ textarea {
   max-height: 220px;
   overflow-y: auto;
   z-index: 5;
+  padding: 4px 0;
 }
 
 .combo-suggestions.open {
@@ -471,6 +472,12 @@ textarea {
   padding: 10px 12px;
   cursor: pointer;
   border-bottom: 1px solid #e5e7eb;
+  width: 100%;
+  background: #fff;
+  border: none;
+  text-align: left;
+  color: #111827;
+  font-size: 14px;
 }
 
 .combo-option:last-child {
